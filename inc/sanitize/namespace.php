@@ -324,7 +324,7 @@ function normalize_css_urls( $css, $url_path = '' ) {
 	$css = preg_replace_callback(
 		$url_regex, function ( $matches ) use ( $url_path, $root_theme ) {
 
-			$buckram_dir = get_theme_root( 'pressbooks-book' ) . '/pressbooks-book/assets/book/';
+			$buckram_dir = get_theme_root( 'pressbooks-book' ) . '/pressbooks-book/packages/buckram/assets/';
 			$typography_dir = get_theme_root( 'pressbooks-book' ) . '/pressbooks-book/assets/book/typography/';
 
 			$url = $matches[3];
@@ -356,7 +356,14 @@ function normalize_css_urls( $css, $url_path = '' ) {
 				$url = str_replace( 'pressbooks-book/assets/book/', '', $url );
 				$my_asset = realpath( $buckram_dir . $url );
 				if ( $my_asset ) {
-					return 'url(' . $root_theme . '/assets/book/' . $url . ')';
+					return 'url(' . $root_theme . '/packages/buckram/assets/' . $url . ')';
+				}
+			}
+
+			if ( preg_match( '#^images/[a-zA-Z0-9_-]+(\.svg|\.png)$#i', $url ) ) {
+				$my_asset = realpath( $buckram_dir . $url );
+				if ( $my_asset ) {
+					return 'url(' . $root_theme . '/packages/buckram/assets/' . $url . ')';
 				}
 			}
 
@@ -676,4 +683,36 @@ function reverse_wpautop( $pee ) {
 	}
 
 	return $pee;
+}
+
+/**
+ * Sanitize post content for webbook output.
+ *
+ * @since 5.6.0
+ *
+ * @param string $content
+ * @return string
+ */
+
+function sanitize_webbook_content( $content ) {
+	$spec = '';
+	$spec .= 'table=-border;';
+
+	return \Pressbooks\HtmLawed::filter( $content, [], $spec );
+}
+
+/**
+ * Apply the_content filters minus webbook-specific ones.
+ *
+ * @since 5.6.0
+ *
+ * @param string $content Input content
+ * @return string
+ */
+
+function filter_export_content( $content ) {
+	remove_filter( 'the_content', '\Pressbooks\Sanitize\sanitize_webbook_content' );
+	$content = apply_filters( 'the_content', $content );
+	add_filter( 'the_content', '\Pressbooks\Sanitize\sanitize_webbook_content' );
+	return $content;
 }

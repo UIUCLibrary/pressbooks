@@ -2,6 +2,7 @@
 
 namespace Pressbooks\Api;
 
+use function Pressbooks\Utility\str_starts_with;
 use Pressbooks\Admin\Network\SharingAndPrivacyOptions;
 
 /**
@@ -76,6 +77,49 @@ function init_book() {
 
 	// Batch endpoint
 	init_batch();
+
+	// Gutenberg hack
+	gutenberg_hack();
+}
+
+/**
+ * Gutenberg hack
+ *
+ * Expose post types and taxonomies in REST /wp/v2/ namespace. Hacky way of getting our post types working with WordPress
+ * without having to keep nagging them to fix their project for broader use cases.
+ *
+ * @see https://github.com/WordPress/gutenberg/issues/8683
+ */
+function gutenberg_hack() {
+	if ( current_user_can( 'edit_posts' ) === false ) {
+		// If the user cannot edit posts then don't turn on this hack.
+		// Our Public/Private mechanisms are ignored by WP_REST_Controller(s) and we don't want these exposed to the world.
+		return;
+	}
+
+	// TODO: Remove this once https://core.trac.wordpress.org/ticket/44864 is fixed.
+	if ( is_multisite() ) {
+		require_once( ABSPATH . 'wp-admin/includes/ms-admin-filters.php' );
+		require_once( ABSPATH . 'wp-admin/includes/ms.php' );
+		require_once( ABSPATH . 'wp-admin/includes/ms-deprecated.php' );
+	}
+
+	foreach ( get_post_types( [ 'show_in_rest' => true ], 'objects' ) as $post_type ) {
+		if ( $post_type->rest_controller_class === '\Pressbooks\Api\Endpoints\Controller\Posts' ) {
+			$controller = new \WP_REST_Posts_Controller( $post_type->name );
+			$controller->register_routes();
+			if ( post_type_supports( $post_type->name, 'revisions' ) ) {
+				$revisions_controller = new \WP_REST_Revisions_Controller( $post_type->name );
+				$revisions_controller->register_routes();
+			}
+		}
+	}
+	foreach ( get_taxonomies( [ 'show_in_rest' => true ], 'object' ) as $taxonomy ) {
+		if ( $taxonomy->rest_controller_class === '\Pressbooks\Api\Endpoints\Controller\Terms' ) {
+			$controller = new \WP_REST_Terms_Controller( $taxonomy->name );
+			$controller->register_routes();
+		}
+	}
 }
 
 /**
@@ -189,27 +233,37 @@ function batch_serve_request( $request ) {
 /**
  * Hide endpoints that don't work well with a book api
  *
+ * @see https://github.com/WordPress/gutenberg/issues/8683
+ *
  * @param array $endpoints
  *
  * @return array
  */
 function hide_endpoints_from_book( $endpoints ) {
-
-	foreach ( $endpoints as $key => $val ) {
-		if (
-			( strpos( $key, '/wp/v2/posts' ) === 0 ) ||
-			( strpos( $key, '/wp/v2/pages' ) === 0 ) ||
-			( strpos( $key, '/wp/v2/tags' ) === 0 ) ||
-			( strpos( $key, '/wp/v2/categories' ) === 0 ) ||
-			( strpos( $key, '/wp/v2/front-matter-type' ) === 0 ) ||
-			( strpos( $key, '/wp/v2/chapter-type' ) === 0 ) ||
-			( strpos( $key, '/wp/v2/back-matter-type' ) === 0 ) ||
-			( strpos( $key, '/wp/v2/glossary-type' ) === 0 ) ||
-			( strpos( $key, '/wp/v2/license' ) === 0 ) ||
-			( strpos( $key, '/wp/v2/contributor' ) === 0 ) ||
-			( strpos( $key, '/wp/v2' ) === 0 && strpos( $key, '/revisions' ) !== false )
-		) {
-			unset( $endpoints[ $key ] );
+	// If the user cannot edit posts then hide certain WP endpoints.
+	// Our Public/Private mechanisms are ignored by WP_REST_Controller(s) and we don't want these exposed to the world.
+	if ( current_user_can( 'edit_posts' ) === false ) {
+		foreach ( $endpoints as $key => $val ) {
+			if ( str_starts_with( $key, '/wp/v2/media' ) ) {
+				// Don't touch media
+				continue;
+			}
+			if (
+				( str_starts_with( $key, '/wp/v2/posts' ) ) ||
+				( str_starts_with( $key, '/wp/v2/pages' ) ) ||
+				( str_starts_with( $key, '/wp/v2/tags' ) ) ||
+				( str_starts_with( $key, '/wp/v2/categories' ) ) ||
+				( str_starts_with( $key, '/wp/v2/front-matter-type' ) ) ||
+				( str_starts_with( $key, '/wp/v2/chapter-type' ) ) ||
+				( str_starts_with( $key, '/wp/v2/back-matter-type' ) ) ||
+				( str_starts_with( $key, '/wp/v2/glossary-type' ) ) ||
+				( str_starts_with( $key, '/wp/v2/license' ) ) ||
+				( str_starts_with( $key, '/wp/v2/contributor' ) ) ||
+				( str_starts_with( $key, '/wp/v2' ) && strpos( $key, '/revisions' ) !== false ) ||
+				( str_starts_with( $key, '/wp/v2' ) && strpos( $key, '/autosaves' ) !== false )
+			) {
+				unset( $endpoints[ $key ] );
+			}
 		}
 	}
 
@@ -253,6 +307,39 @@ function fix_book_urls( $url, $path ) {
 	}
 
 	return $url;
+}
+
+/**
+ * @param \WP_REST_Response $response The response object.
+ * @param \WP_Post $post The original attachment post.
+ * @param \WP_REST_Request $request Request used to generate the response.
+ *
+ * @return \WP_REST_Response
+ */
+function fix_attachment( $response, $post, $request ) {
+	// This filter is called twice in a single request.
+	// The 1st time by `apply_filters( "rest_prepare_{$this->post_type}" ...` in parent class WP_REST_Posts_Controller::prepare_item_for_response
+	// The 2nd time by `apply_filters( 'rest_prepare_attachment' ...` in child class WP_REST_Attachments_Controller::prepare_item_for_response
+	if ( ! isset( $response->data['media_type'] ) ) {
+		// Was called by the 1st, is not an attachment (yet), so bail
+		return $response;
+	}
+
+	// Add raw data to view/embed contexts so that we can use it when cloning over REST API
+	$context = ! empty( $request['context'] ) ? $request['context'] : 'view';
+	if ( $context === 'view' || $context === 'embed' ) {
+		if ( isset( $response->data['title'] ) && ! isset( $response->data['title']['raw'] ) ) {
+			$response->data['title']['raw'] = $post->post_title;
+		}
+		if ( isset( $response->data['description'] ) && ! isset( $response->data['description']['raw'] ) ) {
+			$response->data['description']['raw'] = $post->post_content;
+		}
+		if ( isset( $response->data['caption'] ) && ! isset( $response->data['caption']['raw'] ) ) {
+			$response->data['caption']['raw'] = $post->post_excerpt;
+		}
+	}
+
+	return $response;
 }
 
 /**

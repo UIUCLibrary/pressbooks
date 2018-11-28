@@ -93,7 +93,7 @@ There are many maths like it but these ones are mine.
 
 [caption id="attachment_1" align="aligncenter" width="225"]<img class="wp-image-1 size-full" src="https://pressbooks.com/wp-content/uploads/2015/04/open-book-7-225x161.png" alt="Open Book" width="225" height="161" /> Like an open book.[/caption]
 
-<em>Ka kite ano!</em>
+<em>Ka kite ano!</em><b></b>
 
 <p><a href="/back-matter/appendix/">Link to another post.</a></p>
 
@@ -124,7 +124,7 @@ There are many maths like it but these ones are mine.
 			$content .= "
 [video]{$video_url}[/video]
 
-{$thumbnail_html}		
+{$thumbnail_html}
 ";
 		}
 
@@ -166,15 +166,21 @@ There are many maths like it but these ones are mine.
 
 
 	/**
-	 * Fake ajax
+	 * @return int
 	 */
 	private function _fakeAjax() {
-
-		if ( ! defined( 'DOING_AJAX' ) ) {
-			define( 'DOING_AJAX', true );
-		}
+		add_filter( 'wp_doing_ajax', '__return_true' );
 		add_filter( 'wp_die_ajax_handler', '__return_false', 1, 1 ); // Override die()
-		error_reporting( error_reporting() & ~E_WARNING ); // Suppress warnings
+		return error_reporting( error_reporting() & ~E_WARNING ); // Suppress warnings
+	}
+
+	/**
+	 * @param int $old_error_reporting
+	 */
+	private function _fakeAjaxDone( $old_error_reporting ) {
+		remove_filter( 'wp_doing_ajax', '__return_true' );
+		remove_filter( 'wp_die_ajax_handler', '__return_false', 1 );
+		error_reporting( $old_error_reporting );
 	}
 
 	/**
@@ -204,11 +210,15 @@ There are many maths like it but these ones are mine.
 		if ( ! post_type_exists( 'chapter' ) ) {
 			\Pressbooks\PostType\register_post_types();
 		}
+		if ( ! registered_meta_key_exists( 'post', 'pb_media_attribution_author', 'attachment' ) ) {
+			\Pressbooks\PostType\register_meta();
+		}
 		\Pressbooks\Metadata\init_book_data_models();
 		remove_action( 'rest_api_init', '\Pressbooks\Api\init_root' );
 		add_action( 'rest_api_init', '\Pressbooks\Api\init_book' );
 		add_filter( 'rest_endpoints', 'Pressbooks\Api\hide_endpoints_from_book' );
-		add_filter( 'rest_url', 'Pressbooks\Api\fix_book_urls', 10, 2 );
+		add_filter( 'rest_url', '\Pressbooks\Api\fix_book_urls', 10, 2 );
+		add_filter( 'rest_prepare_attachment', '\Pressbooks\Api\fix_attachment', 10, 3 );
 
 		do_action( 'rest_api_init' );
 		return $server;
@@ -245,5 +255,4 @@ There are many maths like it but these ones are mine.
 
 		return $allowed;
 	}
-
 }

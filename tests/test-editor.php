@@ -55,6 +55,17 @@ class EditorTest extends \WP_UnitTestCase {
 		$buttons = Pressbooks\Editor\mce_buttons_3( [] );
 
 		$this->assertContains( 'anchor', $buttons );
+		$this->assertContains( 'footnote', $buttons );
+		$this->assertContains( 'ftnref_convert', $buttons );
+		$this->assertContains( 'glossary', $buttons );
+		$this->assertContains( 'glossary_all', $buttons );
+		$this->assertContains( 'wp_code', $buttons );
+	}
+
+	public function test_admin_enqueue_scripts() {
+		\Pressbooks\Editor\admin_enqueue_scripts( 'post.php' );
+		$this->assertTrue( wp_script_is( 'my_custom_quicktags', 'queue' ) );
+		$this->assertTrue( wp_script_is( 'wp-api', 'queue' ) );
 	}
 
 	public function test_mce_button_scripts() {
@@ -62,6 +73,9 @@ class EditorTest extends \WP_UnitTestCase {
 		$x = Pressbooks\Editor\mce_button_scripts( [] );
 
 		$this->assertArrayHasKey( 'table', $x );
+		$this->assertArrayHasKey( 'footnote', $x );
+		$this->assertArrayHasKey( 'ftnref_convert', $x );
+		$this->assertArrayHasKey( 'glossary', $x );
 	}
 
 	public function test_mce_before_init_insert_formats() {
@@ -160,6 +174,15 @@ class EditorTest extends \WP_UnitTestCase {
 	public function test_show_kitchen_sink() {
 		$result = \Pressbooks\Editor\show_kitchen_sink( [] );
 		$this->assertFalse( $result['wordpress_adv_hidden'] );
+	}
+
+	public function test_force_classic_editor_mode() {
+		update_option( 'classic-editor-replace', 'no-replace' );
+		$this->assertEquals( 'no-replace', get_option( 'classic-editor-replace' ) );
+		\Pressbooks\Editor\hide_gutenberg();
+		$this->assertTrue( has_filter( 'use_block_editor_for_post_type' ) );
+		$this->assertFalse( is_plugin_active( 'gutenberg/gutenberg.php' ) );
+		$this->assertEquals( 'replace', get_option( 'classic-editor-replace' ) );
 	}
 
 }

@@ -22,11 +22,11 @@
 		"jquery-match-height": "^0.7.2",
 		"jquery-sticky": "^1.0.4",
 		"js-cookie": "^2.1.4",
-		"pagedjs": "^0.1.14",
+		"pagedjs": "^0.1.25",
 		"select2": "^4.0.3",
 		"sidr": "^2.2.1",
-		"tinymce": "^4.8.2",
-		"wp-admin-colors": "^4.9.5",
+		"tinymce": "^4.8.5",
+		"wp-admin-colors": "^4.9.8",
 		"wpapi": "^1.1.2"
 	},
 	"devDependencies": {

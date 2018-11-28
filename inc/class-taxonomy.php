@@ -18,7 +18,7 @@ class Taxonomy {
 	 * @see upgrade()
 	 * @var int
 	 */
-	const VERSION = 3;
+	const VERSION = 4;
 
 	/**
 	 * @var Taxonomy
@@ -59,7 +59,12 @@ class Taxonomy {
 			add_action( 'profile_update', [ $obj->contributors, 'updateBlogUser' ], 10, 2 );
 			add_action( 'added_post_meta', [ $obj, 'upgradeToContributorTaxonomy' ], 10, 4 );
 			add_action( 'updated_postmeta', [ $obj, 'upgradeToContributorTaxonomy' ], 10, 4 );
-			add_filter( 'contributor_row_actions', [ $obj, 'removeContributorViewLink' ], 10, 2 );
+			add_filter( 'front-matter-type_row_actions', [ $obj, 'removeTaxonomyViewLinks' ], 10, 2 );
+			add_filter( 'back-matter-type_row_actions', [ $obj, 'removeTaxonomyViewLinks' ], 10, 2 );
+			add_filter( 'chapter-type_row_actions', [ $obj, 'removeTaxonomyViewLinks' ], 10, 2 );
+			add_filter( 'glossary-type_row_actions', [ $obj, 'removeTaxonomyViewLinks' ], 10, 2 );
+			add_filter( 'license_row_actions', [ $obj, 'removeTaxonomyViewLinks' ], 10, 2 );
+			add_filter( 'contributor_row_actions', [ $obj, 'removeTaxonomyViewLinks' ], 10, 2 );
 		}
 	}
 
@@ -430,9 +435,7 @@ class Taxonomy {
 			]
 		);
 
-		$disable_translation = true;
-		$disable_custom = true;
-		foreach ( $this->licensing->getSupportedTypes( $disable_translation, $disable_custom ) as $key => $val ) {
+		foreach ( $this->licensing->getSupportedTypes( true, true ) as $key => $val ) {
 			wp_insert_term(
 				$val['desc'], Licensing::TAXONOMY, [
 					'slug' => $key,
@@ -554,6 +557,9 @@ class Taxonomy {
 		if ( $version < 3 ) {
 			$this->upgradeLicenses();
 		}
+		if ( $version < 4 ) {
+			$this->differentiatePublicDomain();
+		}
 	}
 
 	/**
@@ -569,6 +575,27 @@ class Taxonomy {
 		);
 		foreach ( $results as $val ) {
 			wp_set_object_terms( $val['post_id'], $val['meta_value'], Licensing::TAXONOMY );
+		}
+	}
+
+	/**
+	 *
+	 */
+	protected function differentiatePublicDomain() {
+		foreach ( $this->licensing->getSupportedTypes( true, true ) as $key => $val ) {
+			if ( $key === 'public-domain' ) {
+				$public_domain = get_term_by( 'slug', $key, Licensing::TAXONOMY );
+				wp_update_term( $public_domain->term_id, Licensing::TAXONOMY, [
+					'name' => $val['desc'],
+				] );
+			}
+			if ( $key === 'cc-zero' ) {
+				wp_insert_term(
+					$val['desc'], Licensing::TAXONOMY, [
+						'slug' => $key,
+					]
+				);
+			}
 		}
 	}
 
@@ -625,13 +652,13 @@ class Taxonomy {
 	}
 
 	/**
-	 * Remove the "View" link from the Contributors taxonomy.
+	 * Remove the "View" link from the taxonomies.
 	 *
 	 * @param array $actions The default actions.
-	 * @param WP_Term $tag The term object.
+	 * @param \WP_Term $tag The term object.
 	 * @return array
 	 */
-	public function removeContributorViewLink( $actions, $tag ) {
+	public function removeTaxonomyViewLinks( $actions, $tag ) {
 		unset( $actions['view'] );
 		return $actions;
 	}

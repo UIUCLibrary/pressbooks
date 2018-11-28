@@ -15,10 +15,10 @@ use function Pressbooks\Utility\oxford_comma_explode;
 use function Pressbooks\Utility\str_ends_with;
 use function Pressbooks\Utility\str_lreplace;
 use function Pressbooks\Utility\str_starts_with;
-use Masterminds\HTML5;
 use Pressbooks\Book;
 use Pressbooks\Container;
 use Pressbooks\Contributors;
+use Pressbooks\HtmlParser;
 use Pressbooks\Modules\Export\Export;
 use Pressbooks\Sanitize;
 use Pressbooks\Taxonomy;
@@ -219,7 +219,7 @@ class Epub201 extends Export {
 		}
 
 		if ( ! defined( 'PB_EPUBCHECK_COMMAND' ) ) {
-			define( 'PB_EPUBCHECK_COMMAND', '/usr/bin/epubcheck' );
+			define( 'PB_EPUBCHECK_COMMAND', '/usr/bin/java -jar /opt/epubcheck/epubcheck.jar' );
 		}
 
 		$this->tmpDir = $this->createTmpDir();
@@ -471,8 +471,8 @@ class Epub201 extends Export {
 	 * @return string
 	 */
 	protected function preProcessPostContent( $content ) {
-
-		$content = apply_filters( 'the_content', $content );
+		$content = apply_filters( 'the_export_content', $content );
+		$content = str_ireplace( [ '<b></b>', '<i></i>', '<strong></strong>', '<em></em>' ], '', $content );
 		$content = $this->fixAnnoyingCharacters( $content );
 		$content = $this->tidy( $content );
 
@@ -497,11 +497,15 @@ class Epub201 extends Export {
 			'valid_xhtml' => 1,
 			'no_deprecated_attr' => 2,
 			'unique_ids' => 'fixme-',
-			'deny_attribute' => 'itemscope,itemtype,itemref,itemprop',
+			'deny_attribute' => 'itemscope,itemtype,itemref,itemprop,data*,aria*',
 			'hook' => '\Pressbooks\Sanitize\html5_to_xhtml11',
 			'tidy' => -1,
 			'comment' => 1,
 		];
+
+		$spec = '';
+		$spec .= 'img=-longdesc,-srcset;';
+		$spec .= 'table=-border;';
 
 		// Reset on each htmLawed invocation
 		unset( $GLOBALS['hl_Ids'] );
@@ -509,7 +513,7 @@ class Epub201 extends Export {
 			$GLOBALS['hl_Ids'] = $this->fixme;
 		}
 
-		return \Pressbooks\HtmLawed::filter( $html, $config );
+		return \Pressbooks\HtmLawed::filter( $html, $config, $spec );
 	}
 
 
@@ -708,7 +712,7 @@ class Epub201 extends Export {
 		$css = preg_replace_callback(
 			$url_regex, function ( $matches ) use ( $scss_dir, $path_to_epub_assets ) {
 
-				$buckram_dir = get_theme_root( 'pressbooks-book' ) . '/pressbooks-book/assets/book/';
+				$buckram_dir = get_theme_root( 'pressbooks-book' ) . '/pressbooks-book/packages/buckram/assets/';
 				$typography_dir = get_theme_root( 'pressbooks-book' ) . '/pressbooks-book/assets/book/typography/';
 
 				$url = $matches[3];
@@ -717,6 +721,12 @@ class Epub201 extends Export {
 				// Look for images in Buckram
 				if ( preg_match( '#^pressbooks-book/assets/book/images/[a-zA-Z0-9_-]+(' . $this->supportedImageExtensions . ')$#i', $url ) ) {
 					$url = str_replace( 'pressbooks-book/assets/book/', '', $url );
+					$my_image = realpath( $buckram_dir . $url );
+					if ( $my_image ) {
+						copy( $my_image, "$path_to_epub_assets/$filename" );
+						return "url(assets/$filename)";
+					}
+				} elseif ( preg_match( '#^images/[a-zA-Z0-9_-]+(' . $this->supportedImageExtensions . ')$#i', $url ) ) {
 					$my_image = realpath( $buckram_dir . $url );
 					if ( $my_image ) {
 						copy( $my_image, "$path_to_epub_assets/$filename" );
@@ -1214,11 +1224,10 @@ class Epub201 extends Export {
 			$subtitle = trim( get_post_meta( $front_matter_id, 'pb_subtitle', true ) );
 			$author = $this->contributors->get( $front_matter_id, 'pb_authors' );
 
-			if ( Export::isParsingSubsections() === true ) {
-				$sections = Book::getSubsections( $front_matter_id );
-
-				if ( $sections ) {
+			if ( Export::shouldParseSubsections() === true ) {
+				if ( Book::getSubsections( $front_matter_id ) !== false ) {
 					$content = Book::tagSubsections( $content, $front_matter_id );
+					$content = \Pressbooks\HtmLawed::filter( $content, [ 'valid_xhtml' => 1 ] );
 				}
 			}
 
@@ -1386,11 +1395,10 @@ class Epub201 extends Export {
 				$subtitle = trim( get_post_meta( $chapter_id, 'pb_subtitle', true ) );
 				$author = $this->contributors->get( $chapter_id, 'pb_authors' );
 
-				if ( Export::isParsingSubsections() === true ) {
-					$sections = Book::getSubsections( $chapter_id );
-
-					if ( $sections ) {
+				if ( Export::shouldParseSubsections() === true ) {
+					if ( Book::getSubsections( $chapter_id ) !== false ) {
 						$content = Book::tagSubsections( $content, $chapter_id );
+						$content = \Pressbooks\HtmLawed::filter( $content, [ 'valid_xhtml' => 1 ] );
 					}
 				}
 
@@ -1429,13 +1437,13 @@ class Epub201 extends Export {
 					$append_chapter_content .= $this->kneadHtml( $this->tidy( $section_license ), 'chapter', $j );
 				}
 
-				$n = ( strpos( $subclass, 'numberless' ) === false ) ? $c : '';
+				$my_chapter_number = ( strpos( $subclass, 'numberless' ) === false ) ? $c : '';
 				$vars['post_title'] = $chapter['post_title'];
 				$vars['post_content'] = sprintf(
 					$chapter_printf,
 					$subclass,
 					$slug,
-					( $this->numbered ? $n : '' ),
+					( $this->numbered ? $my_chapter_number : '' ),
 					Sanitize\decode( $title ),
 					$after_title,
 					$content,
@@ -1461,7 +1469,7 @@ class Epub201 extends Export {
 
 				$j++;
 
-				if ( 'numberless' !== $subclass ) {
+				if ( $my_chapter_number !== '' ) {
 					++$c;
 				}
 			}
@@ -1619,11 +1627,10 @@ class Epub201 extends Export {
 			$subtitle = trim( get_post_meta( $back_matter_id, 'pb_subtitle', true ) );
 			$author = $this->contributors->get( $back_matter_id, 'pb_authors' );
 
-			if ( Export::isParsingSubsections() === true ) {
-				$sections = Book::getSubsections( $back_matter_id );
-
-				if ( $sections ) {
+			if ( Export::shouldParseSubsections() === true ) {
+				if ( Book::getSubsections( $back_matter_id ) !== false ) {
 					$content = Book::tagSubsections( $content, $back_matter_id );
+					$content = \Pressbooks\HtmLawed::filter( $content, [ 'valid_xhtml' => 1 ] );
 				}
 			}
 
@@ -1746,7 +1753,17 @@ class Epub201 extends Export {
 				if ( get_post_meta( $v['ID'], 'pb_part_invisible', true ) === 'on' ) {
 					$class .= ' display-none';
 				} else {
-					$title = ( $this->numbered ? __( 'Part', 'pressbooks' ) . ' ' . \Pressbooks\L10n\romanize( $m ) . '. ' : '' ) . $title;
+					/**
+					 * Filter the label used for post types (front matter/parts/chapters/back matter) in the TOC and section headings.
+					 *
+					 * @since 5.6.0
+					 *
+					 * @param string $label
+					 * @param array $args
+					 *
+					 * @return string Filtered label
+					 */
+					$title = ( $this->numbered ? apply_filters( 'pb_post_type_label', __( 'Part', 'pressbooks' ), [ 'post_type' => 'part' ] ) . ' ' . \Pressbooks\L10n\romanize( $m ) . '. ' : '' ) . $title;
 					$m++;
 				}
 			} elseif ( preg_match( '/^chapter-/', $k ) ) {
@@ -1786,7 +1803,7 @@ class Epub201 extends Export {
 
 			$html .= '</a>';
 
-			if ( Export::isParsingSubsections() === true && $class !== 'part' ) {
+			if ( Export::shouldParseSubsections() === true && $class !== 'part' ) {
 				$sections = Book::getSubsections( $v['ID'] );
 				if ( $sections ) {
 					$html .= '<ul class="sections">';
@@ -1860,12 +1877,8 @@ class Epub201 extends Export {
 	 */
 	protected function kneadHtml( $html, $type, $pos = 0 ) {
 
-		$doc = new HTML5(
-			[
-				'disable_html_ns' => true,
-			]
-		); // Disable default namespace for \DOMXPath compatibility
-		$dom = $doc->loadHTML( $html );
+		$html5 = new HtmlParser();
+		$dom = $html5->loadHTML( $html, [ 'disable_html_ns' => true ] ); // Disable default namespace for \DOMXPath compatibility
 
 		// Download images, change to relative paths
 		$dom = $this->scrapeAndKneadImages( $dom );
@@ -1883,13 +1896,6 @@ class Epub201 extends Export {
 				/** @var \DOMElement $node */
 				$node->appendChild( new \DOMText( '' ) );
 			}
-		}
-
-		// Remove srcset attributes because responsive images aren't a thing in the EPUB world.
-		$srcsets = $xpath->query( '//img[@srcset]' );
-		foreach ( $srcsets as $srcset ) {
-			/** @var \DOMElement $srcset */
-			$srcset->removeAttribute( 'srcset' );
 		}
 
 		// If you are storing multi-byte characters in XML, then saving the XML using saveXML() will create problems.
@@ -1924,7 +1930,7 @@ class Epub201 extends Export {
 			// Fetch image, change src
 			$url = $image->getAttribute( 'src' );
 			// Replace Buckram SVGs with PNGs
-			if ( str_starts_with( $url, get_template_directory_uri() . '/assets/book/images' ) && str_ends_with( $url, '.svg' ) ) {
+			if ( str_starts_with( $url, get_template_directory_uri() . '/packages/buckram/assets/images' ) && str_ends_with( $url, '.svg' ) ) {
 				$url = str_replace( '.svg', '.png', $url );
 			}
 			$filename = $this->fetchAndSaveUniqueImage( $url, $fullpath );

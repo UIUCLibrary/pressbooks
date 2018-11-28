@@ -9,6 +9,8 @@ namespace Pressbooks\Editor;
 use function Pressbooks\Sanitize\normalize_css_urls;
 use PressbooksMix\Assets;
 use Pressbooks\Container;
+use Pressbooks\HtmlParser;
+use Pressbooks\Shortcodes\Glossary\Glossary;
 
 /**
  * Ensure that Word formatting that we like doesn't get filtered out.
@@ -26,6 +28,10 @@ function mce_valid_word_elements( $init_array ) {
 
 /**
  * Localize TinyMCE plugins.
+ *
+ * @param array $array
+ *
+ * @return array
  */
 function add_languages( $array ) {
 	$array[] = PB_PLUGIN_DIR . 'languages/tinymce.php';
@@ -34,28 +40,102 @@ function add_languages( $array ) {
 
 /**
  * Adds style select dropdown, textbox and background color buttons to the MCE buttons array.
+ *
+ * @param array $buttons
+ *
+ * @return array
  */
 function mce_buttons_2( $buttons ) {
-
-	array_splice( $buttons, 0, 0, 'styleselect' );
-	$p = array_search( 'styleselect', $buttons, true );
-	array_splice( $buttons, $p + 1, 0, 'textboxes' );
-	$p = array_search( 'textboxes', $buttons, true );
-	array_splice( $buttons, $p + 1, 0, 'underline' );
+	// Prepend elements to the beginning of array
+	array_unshift( $buttons, 'styleselect', 'textboxes', 'underline' );
+	// Insert after hr button
 	$p = array_search( 'hr', $buttons, true );
 	array_splice( $buttons, $p + 1, 0, 'alignjustify' );
+	// Insert after forecolor button
 	$p = array_search( 'forecolor', $buttons, true );
 	array_splice( $buttons, $p + 1, 0, 'backcolor' );
+
 	return $buttons;
 }
 
 /**
  * Adds anchor, superscript and subscript buttons to the MCE buttons array.
+ *
+ * @param array $buttons
+ *
+ * @return array
  */
 function mce_buttons_3( $buttons ) {
+	// Prepend element to the beginning of array
 	array_unshift( $buttons, 'table' );
-	array_push( $buttons, 'apply_class', 'anchor', 'superscript', 'subscript' );
+	// Push elements onto the end of array
+	array_push( $buttons, 'apply_class', 'anchor', 'superscript', 'subscript', 'wp_code' );
+	// Footnotes
+	array_push( $buttons, 'footnote', 'ftnref_convert' );
+	// Glossary
+	// to avoid 'inception' like glossary within a glossary, restricting
+	// glossary buttons means less chance of needing to untangle the labyrinth
+	global $typenow;
+	if ( empty( $typenow ) && ! empty( $_GET['post'] ) && 'edit' === $_GET['action'] ) {
+		$post = get_post( $_GET['post'] );
+		$typenow = $post->post_type;
+	} elseif ( ! empty( $_GET['post_type'] ) ) {
+		$typenow = $_GET['post_type'];
+	}
+	if ( 'glossary' !== $typenow ) {
+		array_push( $buttons, 'glossary', 'glossary_all' );
+	}
+
 	return $buttons;
+}
+
+/**
+ * @param string $hook
+ */
+function admin_enqueue_scripts( $hook ) {
+	$assets = new Assets( 'pressbooks', 'plugin' );
+
+	// Footnotes
+	wp_localize_script(
+		'editor', 'PB_FootnotesToken', [
+			'nonce' => wp_create_nonce( 'pb-footnote-convert' ),
+			'fn_title' => __( 'Insert Footnote', 'pressbooks' ),
+			'ftnref_title' => __( 'Convert MS Word Footnotes', 'pressbooks' ),
+		]
+	);
+
+	// Glossary
+	$glossary_term = get_term_by( 'slug', 'glossary', 'back-matter-type' );
+	if ( $glossary_term ) {
+		$glossary_term_id = $glossary_term->term_id;
+	} else {
+		$glossary_term_id = 0;
+	}
+	wp_localize_script(
+		'editor', 'PB_GlossaryToken', [
+			'cancel' => __( 'Cancel', 'pressbooks' ),
+			'description' => __( 'Description', 'pressbooks' ),
+			'glossary_button_title' => __( 'Insert Glossary Term', 'pressbooks' ),
+			'insert' => __( 'Insert', 'pressbooks' ),
+			'listbox_values' => Glossary::init()->getGlossaryTermsListbox(),
+			'not_found' => _x( 'Glossary term <em>${templateString1}</em> not found. Please create it.', 'JS template string', 'pressbooks' ),
+			'select_a_term' => __( 'Select a Term', 'pressbooks' ),
+			'tab0_title' => __( 'Create and Insert Term', 'pressbooks' ),
+			'tab1_title' => __( 'Choose Existing Term', 'pressbooks' ),
+			'term_already_exists' => __( 'Glossary term already exists.', 'pressbooks' ),
+			'term_id' => $glossary_term_id,
+			'term_is_empty' => __( 'Cannot submit empty Glossary term.', 'pressbooks' ),
+			'term_not_selected' => __( 'A term was not selected?', 'pressbooks' ),
+			'term_notice' => __( "To display a list of glossary terms, leave this back matter's content blank.", 'pressbooks' ),
+			'term_title' => __( 'Term', 'pressbooks' ),
+			'window_title' => __( 'Glossary Terms', 'pressbooks' ),
+		]
+	);
+
+	if ( 'post-new.php' === $hook || 'post.php' === $hook ) {
+		wp_enqueue_script( 'my_custom_quicktags', $assets->getPath( 'scripts/quicktags.js' ), [ 'quicktags' ] );
+		wp_enqueue_script( 'wp-api' );
+	}
 }
 
 
@@ -79,11 +159,20 @@ function mce_button_scripts( $plugin_array ) {
 	$plugin_array['anchor'] = $assets->getPath( 'scripts/anchor.js' );
 	$plugin_array['table'] = $assets->getPath( 'scripts/table.js' );
 
+	// Footnotes
+	$plugin_array['footnote'] = $assets->getPath( 'scripts/footnote.js' );
+	$plugin_array['ftnref_convert'] = $assets->getPath( 'scripts/ftnref-convert.js' );
+
+	// Glossary
+	$plugin_array['glossary'] = $assets->getPath( 'scripts/glossary.js' );
+
 	return $plugin_array;
 }
 
 /**
  * Adds Pressbooks custom CSS classes to the style select dropdown initiated above.
+ *
+ * @see https://codex.wordpress.org/TinyMCE_Custom_Styles#Enabling_styleselect
  *
  * @param array $init_array
  *
@@ -243,6 +332,7 @@ function mce_table_editor_options( $settings ) {
 	$settings['table_cell_advtab'] = false; // Hides border and background colour options.
 	$settings['table_row_advtab'] = false; // Hides border and background colour options.
 	$settings['table_responsive_width'] = true; // Forces percentage width when resizing.
+	$settings['table_default_attributes'] = wp_json_encode( [ 'border' => 0 ] ); // Set border to 0 for accurate editor display
 	$settings['table_class_list'] = wp_json_encode( apply_filters( 'pressbooks_editor_table_classes', $table_classes ) );
 	$settings['table_cell_class_list'] = wp_json_encode( apply_filters( 'pressbooks_editor_cell_classes', $cell_classes ) );
 	$settings['table_row_class_list'] = wp_json_encode( apply_filters( 'pressbooks_editor_row_classes', $row_classes ) );
@@ -335,28 +425,22 @@ function add_anchors_to_wp_link_query( $results, $query ) {
 		$url = rtrim( $result['permalink'], '/' );
 		$post_id = $result['ID'];
 		$post = get_post( $post_id );
-		if ( $post ) {
-			$content = mb_convert_encoding( $post->post_content, 'HTML-ENTITIES', 'UTF-8' );
-			if ( ! empty( trim( $content ) ) ) {
-				libxml_use_internal_errors( true );
-				$doc = new \DOMDocument();
-				$doc->loadHTML( "<div>{$content}</div>", LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD );
-				/** @var \DOMElement $node */
-				foreach ( $doc->getElementsByTagName( 'a' ) as $node ) {
-					if ( $node->hasAttribute( 'id' ) ) {
-						$id_attribute = $node->getAttribute( 'id' );
-						$permalink = ( (int) $current_post_id !== (int) $post->ID ) ? $url : '';
-						$permalink .= "#{$id_attribute}";
-						$new_results[] = [
-							'ID' => $post->ID,
-							'title' => '#' . $id_attribute . ' (' . $post->post_title . ')',
-							'permalink' => $permalink,
-							'info' => __( 'Internal Link', 'pressbooks' ),
-						];
-					}
+		if ( $post && ! empty( trim( $post->post_content ) ) ) {
+			$html5 = new HtmlParser( true );
+			$doc = $html5->loadHTML( $post->post_content );
+			/** @var \DOMElement $node */
+			foreach ( $doc->getElementsByTagName( 'a' ) as $node ) {
+				if ( $node->hasAttribute( 'id' ) ) {
+					$id_attribute = $node->getAttribute( 'id' );
+					$permalink = ( (int) $current_post_id !== (int) $post->ID ) ? $url : '';
+					$permalink .= "#{$id_attribute}";
+					$new_results[] = [
+						'ID' => $post->ID,
+						'title' => '#' . $id_attribute . ' (' . $post->post_title . ')',
+						'permalink' => $permalink,
+						'info' => __( 'Internal Link', 'pressbooks' ),
+					];
 				}
-				$errors = libxml_get_errors(); // TODO: Handle errors gracefully
-				libxml_clear_errors();
 			}
 		}
 	}
@@ -374,4 +458,34 @@ function add_anchors_to_wp_link_query( $results, $query ) {
 function show_kitchen_sink( $args ) {
 	$args['wordpress_adv_hidden'] = false;
 	return $args;
+}
+
+/**
+ * Force classic editor mode
+ */
+function hide_gutenberg() {
+	// 4.9.X and below
+	deactivate_plugins( [ 'gutenberg/gutenberg.php' ] );
+
+	// 5.X and up, Classic Editor not present
+	if ( ! function_exists( 'classic_editor_init_actions' ) ) {
+
+		// Don't use block editor for any post types
+		add_filter( 'use_block_editor_for_post_type', function ( $use_block_editor, $post_type ) {
+			return false;
+		}, 10, 2 );
+	}
+
+	// 5.x and up, Classic Editor present
+
+	// Hide "Classic Editor" Settings page, because we don't want people turning Gutenberg back on
+	remove_filter( 'plugin_action_links', 'classic_editor_add_settings_link' );
+	remove_action( 'admin_init', 'classic_editor_admin_init' );
+
+	// Short circuit the classic-editor-replace option, always replace
+	add_filter(
+		'pre_option_classic-editor-replace', function () {
+			return 'replace';
+		}
+	);
 }

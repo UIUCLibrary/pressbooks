@@ -12,23 +12,25 @@ namespace Pressbooks\Redirect;
  * @param string $href a uniform resource locator (URL)
  */
 function location( $href ) {
-
 	$href = filter_var( $href, FILTER_SANITIZE_URL );
-
-	if ( ! headers_sent() ) {
-		header( "Location: $href" );
+	if ( defined( 'WP_TESTS_MULTISITE' ) ) {
+		$GLOBALS['_pb_redirect_location'] = $href; // PHPUnit, Mock, ...
 	} else {
-		// Javascript hack
-		echo "
+		if ( ! headers_sent() ) {
+			header( "Location: $href" );
+		} else {
+			// Javascript hack
+			$href = str_replace( "'", "\'", $href );
+			echo "
 			<script type='text/javascript'>
 			// <![CDATA[
 			window.location = '{$href}';
 			// ]]>
 			</script>
 			";
+		}
+		exit; // Quit script
 	}
-
-	exit; // Quit script
 }
 
 
@@ -198,7 +200,7 @@ function rewrite_rules_for_catalog() {
 function do_catalog( $template ) {
 	if ( get_query_var( 'pagename' ) === 'pb_catalog' ) {
 		$user = get_user_by( 'login', get_query_var( 'pb_catalog_user' ) );
-		if ( $user !== false ) {
+		if ( $user !== false && is_user_spammy( $user ) === false ) {
 			status_header( 200 );
 			return \Pressbooks\Catalog::getTemplatePath();
 		}
@@ -402,7 +404,19 @@ function force_download( $filepath, $inline = false ) {
 
 	// Force download
 	// @codingStandardsIgnoreStart
-	@set_time_limit( 0 );
+	/**
+	 * Maximum execution time, in seconds. If set to zero, no time limit
+	 * Overrides PHP's max_execution_time of a Nginx->PHP-FPM->PHP configuration
+	 * See also request_terminate_timeout (PHP-FPM) and fastcgi_read_timeout (Nginx)
+	 *
+	 * @since 5.6.0
+	 *
+	 * @param int $seconds
+	 * @param string $some_action
+	 *
+	 * @return int
+	 */
+	@set_time_limit( apply_filters( 'pb_set_time_limit', 0, 'download' ) );
 	header( 'Content-Description: File Transfer' );
 	header( 'Content-Type: ' . \Pressbooks\Media\mime_type( $filepath ) );
 	if ( $inline ) {
@@ -440,20 +454,27 @@ function trim_value( &$value ) {
  */
 function redirect_away_from_bad_urls() {
 
-	if ( is_super_admin() ) {
+	if ( wp_doing_ajax() || is_super_admin() ) {
 		return; // Do nothing
 	}
 
+	$current_blog_id = get_current_blog_id();
 	$check_against_url = wp_parse_url( ( is_ssl() ? 'http://' : 'https://' ) . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'], PHP_URL_PATH );
-	$redirect_url = get_site_url( get_current_blog_id(), '/wp-admin/' );
-	$trash_url = get_site_url( get_current_blog_id(), '/wp-admin/edit.php?post_type=chapter&page=trash' );
+	$dashboard_url = get_site_url( $current_blog_id, '/wp-admin/' );
+	$pb_organize_url = get_site_url( $current_blog_id, '/wp-admin/admin.php?page=pb_organize' );
+	$pb_trash_url = get_site_url( $current_blog_id, '/wp-admin/admin.php?page=pb_trash' );
 
 	// ---------------------------------------------------------------------------------------------------------------
-	// Don't let users dig through the trash
+	// Don't let users dig through the default trash interface
 
 	if ( preg_match( '~/wp-admin/edit\.php$~', $check_against_url ) ) {
 		if ( isset( $_REQUEST['post_status'] ) && $_REQUEST['post_status'] === 'trash' ) {
-			\Pressbooks\Redirect\location( $trash_url );
+			// Redirect to the PB trash URL
+			location( $pb_trash_url );
+		}
+		if ( ! empty( $_GET['trashed'] ) ) {
+			// User clicked "Move to Trash" in the post editor, redirect to PB organize page
+			location( $pb_organize_url );
 		}
 	}
 
@@ -463,7 +484,7 @@ function redirect_away_from_bad_urls() {
 	if ( preg_match( '~/wp-admin/post-new\.php$~', $check_against_url ) ) {
 		if ( isset( $_REQUEST['post_type'] ) && ! in_array( $_REQUEST['post_type'], \Pressbooks\PostType\list_post_types(), true ) ) {
 			$_SESSION['pb_notices'][] = __( 'Unsupported post type.', 'pressbooks' );
-			\Pressbooks\Redirect\location( $redirect_url );
+			location( $dashboard_url );
 		}
 	}
 
@@ -497,7 +518,7 @@ function redirect_away_from_bad_urls() {
 			true
 		) ) {
 			$_SESSION['pb_notices'][] = __( 'Unsupported taxonomy.', 'pressbooks' );
-			\Pressbooks\Redirect\location( $redirect_url );
+			location( $dashboard_url );
 		}
 	}
 
@@ -521,7 +542,7 @@ function redirect_away_from_bad_urls() {
 	$expr = '~/wp-admin/(' . implode( '|', $restricted ) . ')\.php$~';
 	if ( preg_match( $expr, $check_against_url ) ) {
 		$_SESSION['pb_notices'][] = __( 'You do not have sufficient permissions to access that URL.', 'pressbooks' );
-		\Pressbooks\Redirect\location( $redirect_url );
+		location( $dashboard_url );
 	}
 }
 
@@ -572,5 +593,9 @@ function programmatic_login( $username ) {
  * @return bool|\WP_User a WP_User object if the username matched an existing user, or false if it didn't
  */
 function allow_programmatic_login( $user, $username, $password ) {
-	return get_user_by( 'login', $username );
+	$user = get_user_by( 'login', $username );
+	if ( $user !== false && is_user_spammy( $user ) === false ) {
+		return $user;
+	}
+	return false;
 }

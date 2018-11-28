@@ -7,7 +7,7 @@
 namespace Pressbooks\Modules\Export\HTMLBook;
 
 use function Pressbooks\Utility\oxford_comma_explode;
-use Masterminds\HTML5;
+use function Pressbooks\Utility\str_starts_with;
 use PressbooksMix\Assets;
 use Pressbooks\HTMLBook\Block\Blockquote;
 use Pressbooks\HTMLBook\Block\OrderedLists;
@@ -22,6 +22,7 @@ use Pressbooks\HTMLBook\Heading\H1;
 use Pressbooks\HTMLBook\Heading\Header;
 use Pressbooks\HTMLBook\Inline\Footnote;
 use Pressbooks\HTMLBook\Validator;
+use Pressbooks\HtmlParser;
 use Pressbooks\Modules\Export\Export;
 use Pressbooks\Sanitize;
 
@@ -97,11 +98,7 @@ class HTMLBook extends Export {
 		$md5 = $this->nonce( $timestamp );
 		$this->url = home_url() . "/format/htmlbook?timestamp={$timestamp}&hashkey={$md5}";
 		if ( ! empty( $_REQUEST['preview'] ) ) {
-			$this->url .= '&' . http_build_query(
-				[
-					'preview' => $_REQUEST['preview'],
-				]
-			);
+			$this->url .= '&preview=1';
 		}
 
 		// Append endnotes to URL?
@@ -171,7 +168,7 @@ class HTMLBook extends Export {
 	/**
 	 * Procedure for "format/htmlbook" rewrite rule.
 	 *
-	 * Supported http params:
+	 * Supported http (aka $_GET) params:
 	 *
 	 *   + timestamp: (int) combines with `hashkey` to allow a 3rd party service temporary access
 	 *   + hashkey: (string) combines with `timestamp` to allow a 3rd party service temporary access
@@ -179,15 +176,12 @@ class HTMLBook extends Export {
 	 *   + style: (string) name of a user generated stylesheet you want included in the header
 	 *   + script: (string) name of javascript file you you want included in the header
 	 *   + preview: (bool) Use `Content-Disposition: inline` instead of `Content-Disposition: attachment` when passing through Export::formSubmit
-	 *   + fullsize-images: (bool) replace images with originals when possible
+	 *   + optimize-for-print: (bool) replace images with originals when possible, add class="print" to <body>, and other print specific features
 	 *
 	 * @see \Pressbooks\Redirect\do_format
 	 *
-	 * @param bool $return (optional)
-	 * If you would like to capture the output of transform,
-	 * use the return parameter. If this parameter is set
-	 * to true, transform will return its output, instead of
-	 * printing it.
+	 * @param bool $return (optional) If you would like to capture the output of transform, use the return parameter. If this parameter is set
+	 * to true, transform will return its output, instead of printing it.
 	 *
 	 * @return mixed
 	 */
@@ -232,7 +226,7 @@ class HTMLBook extends Export {
 		echo "<head>\n";
 		echo '<title>' . get_bloginfo( 'name' ) . "</title>\n";
 
-		if ( is_super_admin( get_current_user_id() ) || WP_DEBUG ) {
+		if ( current_user_can( 'edit_posts' ) ) {
 			if ( ! empty( $_GET['debug'] ) ) {
 				$assets = new Assets( 'pressbooks', 'plugin' );
 				$css = ( $_GET['debug'] === 'prince' ) ? $this->getLatestExportStyleUrl( 'prince' ) : false;
@@ -247,6 +241,13 @@ class HTMLBook extends Export {
 		echo "</head>\n";
 
 		$book = new Book();
+		if ( ! empty( $_GET['optimize-for-print'] ) ) {
+			$book->setAttributes(
+				[
+					'class' => 'print',
+				]
+			);
+		}
 
 		// Before Title Page
 		$this->beforeTitle( $book, $book_contents );
@@ -476,12 +477,12 @@ class HTMLBook extends Export {
 	 * @return string
 	 */
 	protected function preProcessPostContent( $content ) {
-
-		$content = apply_filters( 'the_content', $content );
+		$content = apply_filters( 'the_export_content', $content );
+		$content = str_ireplace( [ '<b></b>', '<i></i>', '<strong></strong>', '<em></em>' ], '', $content );
 		$content = $this->fixAnnoyingCharacters( $content ); // is this used?
 		$content = $this->fixInternalLinks( $content );
 		$content = $this->switchLaTexFormat( $content );
-		if ( ! empty( $_GET['fullsize-images'] ) ) {
+		if ( ! empty( $_GET['optimize-for-print'] ) ) {
 			$content = $this->fixImages( $content );
 		}
 		$content = $this->tidy( $content );
@@ -494,7 +495,7 @@ class HTMLBook extends Export {
 	 *
 	 * @param string $content The section content.
 	 *
-	 * @returns string
+	 * @return string
 	 */
 	protected function switchLaTexFormat( $content ) {
 		$content = preg_replace( '/(quicklatex.com-[a-f0-9]{32}_l3.)(png)/i', '$1svg', $content );
@@ -503,20 +504,50 @@ class HTMLBook extends Export {
 	}
 
 	/**
-	 * @param string $content
+	 * @param string $source_content
 	 *
 	 * @return string
 	 */
-	protected function fixInternalLinks( $content ) {
-		// takes care of PB subdirectory installations of PB
-		$content = preg_replace( '/href\="\/([a-z0-9]*)\/(front\-matter|chapter|back\-matter|part)\/([a-z0-9\-]*)([\/]?)(\#[a-z0-9\-]*)"/', 'href="$5"', $content );
-		$content = preg_replace( '/href\="\/([a-z0-9]*)\/(front\-matter|chapter|back\-matter|part)\/([a-z0-9\-]*)([\/]?)"/', 'href="#$2-$3"', $content );
+	protected function fixInternalLinks( $source_content ) {
 
-		// takes care of PB subdomain installations of PB
-		$content = preg_replace( '/href\="\/(front\-matter|chapter|back\-matter|part)\/([a-z0-9\-]*)([\/]?)(\#[a-z0-9\-]*)"/', 'href="$4"', $content );
-		$output = preg_replace( '/href\="\/(front\-matter|chapter|back\-matter|part)\/([a-z0-9\-]*)([\/]?)"/', 'href="#$1-$2"', $content );
+		if ( stripos( $source_content, '<a' ) === false ) {
+			// There are no <a> tags to look at, skip this
+			return $source_content;
+		}
 
-		return $output;
+		$home_url = rtrim( home_url(), '/' );
+		$html5 = new HtmlParser();
+		$dom = $html5->loadHTML( $source_content );
+		$links = $dom->getElementsByTagName( 'a' );
+
+		$changed = false;
+		foreach ( $links as $link ) {
+			/** @var \DOMElement $link */
+			$href = $link->getAttribute( 'href' );
+			if ( str_starts_with( $href, '/' ) || str_starts_with( $href, $home_url ) ) {
+				$pos = strpos( $href, '#' );
+				if ( $pos !== false ) {
+					// Use the #fragment
+					$fragment = substr( $href, strpos( $href, '#' ) + 1 );
+				} elseif ( preg_match( '%(front\-matter|chapter|back\-matter|part)/([a-z0-9\-]*)([/]?)%', $href, $matches ) ) {
+					// Convert type + slug to #fragment
+					$fragment = "{$matches[1]}-{$matches[2]}";
+				} else {
+					$fragment = false;
+				}
+				if ( $fragment ) {
+					$link->setAttribute( 'href', "#{$fragment}" );
+					$changed = true;
+				}
+			}
+		}
+
+		if ( ! $changed ) {
+			return $source_content;
+		} else {
+			$content = $html5->saveHTML( $dom );
+			return $content;
+		}
 	}
 
 	/**
@@ -529,7 +560,7 @@ class HTMLBook extends Export {
 	 * @return string
 	 */
 	protected function removeAttributionLink( $content ) {
-		$html5 = new HTML5();
+		$html5 = new HtmlParser();
 		$dom = $html5->loadHTML( $content );
 
 		$urls = $dom->getElementsByTagName( 'a' );
@@ -545,7 +576,6 @@ class HTMLBook extends Export {
 		}
 
 		$content = $html5->saveHTML( $dom );
-		$content = \Pressbooks\Sanitize\strip_container_tags( $content );
 
 		return $content;
 	}
@@ -563,7 +593,7 @@ class HTMLBook extends Export {
 		static $already_done = [];
 
 		$changed = false;
-		$html5 = new HTML5();
+		$html5 = new HtmlParser();
 		$dom = $html5->loadHTML( $content );
 
 		$images = $dom->getElementsByTagName( 'img' );
@@ -585,7 +615,6 @@ class HTMLBook extends Export {
 
 		if ( $changed ) {
 			$content = $html5->saveHTML( $dom );
-			$content = \Pressbooks\Sanitize\strip_container_tags( $content );
 		}
 
 		return $content;
@@ -610,7 +639,10 @@ class HTMLBook extends Export {
 			'tidy' => -1,
 		];
 
-		return \Pressbooks\HtmLawed::filter( $html, $config );
+		$spec = '';
+		$spec .= 'table=-border;';
+
+		return \Pressbooks\HtmLawed::filter( $html, $config, $spec );
 	}
 
 
@@ -1063,7 +1095,7 @@ class HTMLBook extends Export {
 
 						$li->appendContent( $li_href );
 
-						if ( \Pressbooks\Modules\Export\Export::isParsingSubsections() === true ) {
+						if ( \Pressbooks\Modules\Export\Export::shouldParseSubsections() === true ) {
 							$sections = \Pressbooks\Book::getSubsections( $chapter['ID'] );
 							if ( $sections ) {
 								$li_sections = '<ol class="sections">';
@@ -1139,7 +1171,7 @@ class HTMLBook extends Export {
 
 					$li->appendContent( $li_href );
 
-					if ( \Pressbooks\Modules\Export\Export::isParsingSubsections() === true ) {
+					if ( \Pressbooks\Modules\Export\Export::shouldParseSubsections() === true ) {
 						$sections = \Pressbooks\Book::getSubsections( $val['ID'] );
 						if ( $sections ) {
 							$li_sections = '<ol class="sections">';
@@ -1196,9 +1228,8 @@ class HTMLBook extends Export {
 			$subtitle = trim( get_post_meta( $front_matter_id, 'pb_subtitle', true ) );
 			$author = trim( get_post_meta( $front_matter_id, 'pb_section_author', true ) );
 
-			if ( \Pressbooks\Modules\Export\Export::isParsingSubsections() === true ) {
-				$sections = \Pressbooks\Book::getSubsections( $front_matter_id );
-				if ( $sections ) {
+			if ( \Pressbooks\Modules\Export\Export::shouldParseSubsections() === true ) {
+				if ( \Pressbooks\Book::getSubsections( $front_matter_id ) !== false ) {
 					$content = \Pressbooks\Book::tagSubsections( $content, $front_matter_id );
 				}
 			}
@@ -1207,9 +1238,6 @@ class HTMLBook extends Export {
 			}
 			if ( $subtitle ) {
 				$content = '<h2 class="chapter-subtitle">' . Sanitize\decode( $subtitle ) . '</h2>' . $content;
-			}
-			if ( $short_title ) {
-				$content = '<h6 class="short-title">' . Sanitize\decode( $short_title ) . '</h6>' . $content;
 			}
 
 			$append_front_matter_content .= $this->removeAttributionLink( $this->doSectionLevelLicense( $metadata, $front_matter_id ) );
@@ -1223,6 +1251,7 @@ class HTMLBook extends Export {
 				[
 					'class' => "front-matter {$subclass}",
 					'id' => "front-matter-{$front_matter['post_name']}",
+					'title' => $short_title ? $short_title : $front_matter['post_title'],
 				]
 			);
 
@@ -1377,7 +1406,7 @@ class HTMLBook extends Export {
 			$my_part->setContent(
 				[
 					$header,
-					$this->preProcessPostContent( $part_content ),
+					$part_content,
 				]
 			);
 
@@ -1398,9 +1427,8 @@ class HTMLBook extends Export {
 				$subtitle = trim( get_post_meta( $chapter_id, 'pb_subtitle', true ) );
 				$author = $this->contributors->get( $chapter_id, 'pb_authors' );
 
-				if ( \Pressbooks\Modules\Export\Export::isParsingSubsections() === true ) {
-					$sections = \Pressbooks\Book::getSubsections( $chapter_id );
-					if ( $sections ) {
+				if ( \Pressbooks\Modules\Export\Export::shouldParseSubsections() === true ) {
+					if ( \Pressbooks\Book::getSubsections( $chapter_id ) !== false ) {
 						$content = \Pressbooks\Book::tagSubsections( $content, $chapter_id );
 					}
 				}
@@ -1410,9 +1438,6 @@ class HTMLBook extends Export {
 				}
 				if ( $subtitle ) {
 					$content = '<h2 class="chapter-subtitle">' . Sanitize\decode( $subtitle ) . '</h2>' . $content;
-				}
-				if ( $short_title ) {
-					$content = '<h6 class="short-title">' . Sanitize\decode( $short_title ) . '</h6>' . $content;
 				}
 
 				// Inject introduction class?
@@ -1440,6 +1465,7 @@ class HTMLBook extends Export {
 				$my_chapter->appendAttributes(
 					[
 						'id' => $slug,
+						'title' => $short_title ? $short_title : $chapter['post_title'],
 					]
 				);
 
@@ -1458,8 +1484,8 @@ class HTMLBook extends Export {
 						'class' => 'chapter-number',
 					]
 				);
-				$n = ( 'numberless' === $subclass ) ? '' : $j;
-				$p->setContent( $n );
+				$my_chapter_number = ( strpos( $subclass, 'numberless' ) === false ) ? $j : '';
+				$p->setContent( $my_chapter_number );
 
 				$header = new Header();
 				$header->setContent(
@@ -1480,7 +1506,7 @@ class HTMLBook extends Export {
 				$my_part->appendContent( $my_chapter );
 				$my_chapters[] = $my_chapter;
 
-				if ( 'numberless' !== $subclass ) {
+				if ( $my_chapter_number !== '' ) {
 					++$j;
 				}
 			}
@@ -1536,9 +1562,8 @@ class HTMLBook extends Export {
 			$subtitle = trim( get_post_meta( $back_matter_id, 'pb_subtitle', true ) );
 			$author = $this->contributors->get( $back_matter_id, 'pb_authors' );
 
-			if ( \Pressbooks\Modules\Export\Export::isParsingSubsections() === true ) {
-				$sections = \Pressbooks\Book::getSubsections( $back_matter_id );
-				if ( $sections ) {
+			if ( \Pressbooks\Modules\Export\Export::shouldParseSubsections() === true ) {
+				if ( \Pressbooks\Book::getSubsections( $back_matter_id ) !== false ) {
 					$content = \Pressbooks\Book::tagSubsections( $content, $back_matter_id );
 				}
 			}
@@ -1547,9 +1572,6 @@ class HTMLBook extends Export {
 			}
 			if ( $subtitle ) {
 				$content = '<h2 class="chapter-subtitle">' . Sanitize\decode( $subtitle ) . '</h2>' . $content;
-			}
-			if ( $short_title ) {
-				$content = '<h6 class="short-title">' . Sanitize\decode( $short_title ) . '</h6>' . $content;
 			}
 
 			$append_back_matter_content .= $this->removeAttributionLink( $this->doSectionLevelLicense( $metadata, $back_matter_id ) );
@@ -1563,6 +1585,7 @@ class HTMLBook extends Export {
 				[
 					'class' => "back-matter {$subclass}",
 					'id' => "back-matter-{$back_matter['post_name']}",
+					'title' => $short_title ? $short_title : $back_matter['post_title'],
 				]
 			);
 

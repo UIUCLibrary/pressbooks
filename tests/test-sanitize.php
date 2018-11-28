@@ -236,9 +236,11 @@ class SanitizeTest extends \WP_UnitTestCase {
 		$css = 'url(/fonts/foo.garbage)';
 		$this->assertEquals( $css, \Pressbooks\Sanitize\normalize_css_urls( $css ) );
 
-		// Image in Buckram
+		// Images in Buckram
 		$css = 'url(pressbooks-book/assets/book/images/icon-video.svg)';
-		$this->assertContains( $template_directory_uri . '/assets/book/images/icon-video.svg', Pressbooks\Sanitize\normalize_css_urls( $css ) );
+		$this->assertContains( $template_directory_uri . '/packages/buckram/assets/images/icon-video.svg', Pressbooks\Sanitize\normalize_css_urls( $css ) );
+		$css = 'url(images/icon-video.svg)';
+		$this->assertContains( $template_directory_uri . '/packages/buckram/assets/images/icon-video.svg', Pressbooks\Sanitize\normalize_css_urls( $css ) );
 	}
 
 	public function test_allow_post_content() {
@@ -391,4 +393,35 @@ RAW;
 		$this->assertEquals( normalize_whitespace( $raw ), normalize_whitespace( $reversed ) );
 	}
 
+
+	public function test_sanitize_webbook_content() {
+		$content = <<< RAW
+<table border="1">
+	<tbody>
+		<tr >
+			<td>Row 1</td>
+		</tr>
+	</tbody>
+</table>
+<p style="text-align: center">This should be centered.</p>
+RAW;
+		$result = \Pressbooks\Sanitize\sanitize_webbook_content( $content );
+		$this->assertContains( '<table>', $result );
+		$this->assertContains( '<p style="text-align: center">This should be centered.</p>', $result );
+	}
+
+	public function test_filter_export_content() {
+		$content = <<< RAW
+<table border="1">
+	<tbody>
+		<tr >
+			<td>Row 1</td>
+		</tr>
+	</tbody>
+</table>
+RAW;
+		$result = \Pressbooks\Sanitize\filter_export_content( $content );
+		$this->assertContains( '<table border="1">', $result );
+
+	}
 }

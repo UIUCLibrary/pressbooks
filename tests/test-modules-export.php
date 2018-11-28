@@ -14,7 +14,6 @@ class ExportMock extends \Pressbooks\Modules\Export\Export {
 	}
 }
 
-
 class Modules_ExportTest extends \WP_UnitTestCase {
 
 	use utilsTrait;
@@ -24,6 +23,37 @@ class Modules_ExportTest extends \WP_UnitTestCase {
 	 */
 	protected $export;
 
+	/**
+	 *
+	 */
+	public function moduleProvider() {
+		return [
+			[ '\Pressbooks\Modules\Export\Xhtml\Xhtml11', false ],
+			[ '\Pressbooks\Modules\Export\Prince\Pdf', '\Pressbooks\Modules\Export\Xhtml\Xhtml11' ],
+			[ '\Pressbooks\Modules\Export\Prince\PrintPdf', '\Pressbooks\Modules\Export\Xhtml\Xhtml11' ],
+			[ '\Pressbooks\Modules\Export\Prince\Docraptor', '\Pressbooks\Modules\Export\Xhtml\Xhtml11' ],
+			[ '\Pressbooks\Modules\Export\Prince\DocraptorPrint', '\Pressbooks\Modules\Export\Xhtml\Xhtml11' ],
+			[ '\Pressbooks\Modules\Export\Epub\Epub201', false ],
+			[ '\Pressbooks\Modules\Export\Epub\Epub3', false ],
+			// [ '\Pressbooks\Modules\Export\Mobi\Kindlegen', '\Pressbooks\Modules\Export\Epub\Epub201' ] // TODO: Download/install Kindlegen in Travis build script
+			[ '\Pressbooks\Modules\Export\InDesign\Icml', false ],
+			[ '\Pressbooks\Modules\Export\WordPress\Wxr', false ],
+			[ '\Pressbooks\Modules\Export\WordPress\VanillaWxr', false ],
+			// [ '\Pressbooks\Modules\Export\Odt\Odt', false ], // TODO: Download/install Saxon-HE in Travis build script
+			[ '\Pressbooks\Modules\Export\HTMLBook\HTMLBook', false ],
+		];
+
+	}
+
+	/**
+	 *
+	 */
+	public function moduleProviderHtml() {
+		return [
+			[ '\Pressbooks\Modules\Export\Xhtml\Xhtml11', false ],
+			[ '\Pressbooks\Modules\Export\HTMLBook\HTMLBook', false ],
+		];
+	}
 
 	/**
 	 *
@@ -69,9 +99,9 @@ class Modules_ExportTest extends \WP_UnitTestCase {
 		$this->assertFalse( $path );
 	}
 
-	public function test_isParsingSubsections() {
+	public function test_shouldParseSubsections() {
 
-		$val = $this->export->isParsingSubsections();
+		$val = $this->export->shouldParseSubsections();
 		$this->assertInternalType( 'bool', $val );
 	}
 
@@ -153,12 +183,12 @@ class Modules_ExportTest extends \WP_UnitTestCase {
 
 		$timestamp1 = time();
 		$css_file1 = Container::get( 'Sass' )->pathToUserGeneratedCss() . "/prince-$timestamp1.css";
-		\Pressbooks\Utility\put_contents( $css_file1, $css );
+		$this->assertTrue( \Pressbooks\Utility\put_contents( $css_file1, $css ) );
 		$css_files[] = $css_file1;
 
 		$timestamp2 = time();
 		$css_file2 = Container::get( 'Sass' )->pathToUserGeneratedCss() . "/prince-$timestamp2.css";
-		\Pressbooks\Utility\put_contents( $css_file1, $css );
+		$this->assertTrue( \Pressbooks\Utility\put_contents( $css_file1, $css ) );
 		$css_files[] = $css_file2;
 
 		$latest = $i->getLatestExportStylePath( 'prince' );
@@ -280,8 +310,10 @@ class Modules_ExportTest extends \WP_UnitTestCase {
 	/**
 	 * Sanity check that exports run without obvious errors
 	 * Verify XHTML content for good measure
+	 *
+	 * @dataProvider moduleProvider
 	 */
-	public function test_sanityChecks() {
+	public function test_sanityChecks( $module, $prerequisite ) {
 
 		$runtime = new \SebastianBergmann\Environment\Runtime();
 
@@ -291,58 +323,48 @@ class Modules_ExportTest extends \WP_UnitTestCase {
 		$user_id = $this->factory()->user->create( [ 'role' => 'contributor' ] );
 		wp_set_current_user( $user_id );
 
-		$modules[] = '\Pressbooks\Modules\Export\Xhtml\Xhtml11'; // Must be first! Other tests depend on this. Never comment out, never change position.
-		$modules[] = '\Pressbooks\Modules\Export\Prince\Pdf';
-		$modules[] = '\Pressbooks\Modules\Export\Prince\PrintPdf';
-		$modules[] = '\Pressbooks\Modules\Export\Prince\Docraptor';
-		$modules[] = '\Pressbooks\Modules\Export\Prince\DocraptorPrint';
-		$modules[] = '\Pressbooks\Modules\Export\Epub\Epub201'; // Must be set before MOBI
-		$modules[] = '\Pressbooks\Modules\Export\Epub\Epub3';
-		// $modules[] = '\Pressbooks\Modules\Export\Mobi\Kindlegen'; // Must be set after EPUB // TODO: Download/install Kindlegen in Travis build script
-		$modules[] = '\Pressbooks\Modules\Export\InDesign\Icml';
-		$modules[] = '\Pressbooks\Modules\Export\WordPress\Wxr';
-		$modules[] = '\Pressbooks\Modules\Export\WordPress\VanillaWxr';
-		// $modules[] = '\Pressbooks\Modules\Export\Odt\Odt'; // TODO: Download/install Saxon-HE in Travis build script
-		$modules[] = '\Pressbooks\Modules\Export\HTMLBook\HTMLBook';
-
 		$paths = [];
 		$xhtml_path = null;
-		foreach ( $modules as $module ) {
+
+		$modules = ( $prerequisite ) ? [ $prerequisite, $module ] : [ $module ];
+
+		foreach ( $modules as $format ) {
 			/** @var \Pressbooks\Modules\Export\Export $exporter */
-			$exporter = new $module( [] );
+			$exporter = new $format( [] );
 
 			if (
-				strpos( $module, '\Prince\\' ) !== false ||
-				strpos( $module, '\Odt\\' ) !== false
+				strpos( $format, '\Prince\\' ) !== false ||
+				strpos( $format, '\Odt\\' ) !== false
 			) {
 				$exporter->url = $xhtml_path;
 			}
 
 			$this->assertTrue( $exporter->convert(), "Could not convert with {$module}" );
-			if ( strpos( $module, '\HTMLBook\HTMLBook' ) !== false ) {
-				// TODO: HTMLBook is too strict we don't pass the validation
-			} elseif ( $runtime->isPHPDBG() && strpos( $module, '\Epub\Epub' ) !== false ) {
-				// TODO: exec(): Unable to fork [/usr/bin/epubcheck -q /path/to.epub 2>&1]
-			} else {
-				$this->assertTrue( $exporter->validate(), "Could not validate with {$module}" );
-			}
 			$paths[] = $exporter->getOutputPath();
-
-			if ( strpos( $module, '\Xhtml\Xhtml11' ) !== false ) {
+			if ( strpos( $format, '\Xhtml\Xhtml11' ) !== false ) {
 				$xhtml_path = $exporter->getOutputPath();
+			}
+			if ( strpos( $format, '\HTMLBook\HTMLBook' ) !== false ) {
+				// TODO: HTMLBook is too strict we don't pass the validation
+			} elseif ( $runtime->isPHPDBG() && strpos( $format, '\Epub\Epub' ) !== false ) {
+				// TODO: exec(): Unable to fork [/usr/bin/java -jar /opt/epubcheck/epubcheck.jar -q /path/to.epub 2>&1]
+			} else {
+				$this->assertTrue( $exporter->validate(), "Could not validate with {$format}" );
 			}
 
 			unset( $exporter );
 		}
 
-		// Verify XHTML content for good measure
-		$xhtml_content = file_get_contents( ( $xhtml_path ) );
-		$this->assertContains( '<span class="footnote">', $xhtml_content );
-		$this->assertContains( 'wp.com/latex.php', $xhtml_content );
-		$this->assertContains( ' <div id="attachment_1" ', $xhtml_content );
-		$this->assertContains( '<p><em>Ka kite ano!</em></p>', $xhtml_content );
-		$this->assertContains( 'https://github.com/pressbooks/pressbooks', $xhtml_content );
-		$this->assertContains( '</h2><h2 class="chapter-subtitle">Or, A Chapter to Test</h2></div>', $xhtml_content );
+		if ( $xhtml_path ) {
+			// Verify XHTML content for good measure
+			$xhtml_content = file_get_contents( ( $xhtml_path ) );
+			$this->assertContains( '<span class="footnote">', $xhtml_content );
+			$this->assertContains( 'wp.com/latex.php', $xhtml_content );
+			$this->assertContains( ' <div id="attachment_1" ', $xhtml_content );
+			$this->assertContains( '<p><em>Ka kite ano!</em></p>', $xhtml_content );
+			$this->assertContains( 'https://github.com/pressbooks/pressbooks', $xhtml_content );
+			$this->assertContains( '</h2><h2 class="chapter-subtitle">Or, A Chapter to Test</h2></div>', $xhtml_content );
+		}
 
 		foreach ( $paths as $path ) {
 			unlink( $path );
@@ -357,9 +379,10 @@ class Modules_ExportTest extends \WP_UnitTestCase {
 		$user_id = $this->factory()->user->create( [ 'role' => 'contributor' ] );
 		wp_set_current_user( $user_id );
 
-		$exporter = new \Pressbooks\Modules\Export\Xhtml\Xhtml11( [] );
-		$this->assertTrue( $exporter->convert() );
-		$this->assertTrue( $exporter->validate() );
+		$module = '\Pressbooks\Modules\Export\Xhtml\Xhtml11';
+		$exporter = new $module( [] );
+		$this->assertTrue( $exporter->convert(), "Could not convert with {$module}" );
+		$this->assertTrue( $exporter->validate(), "Could not validate with {$module}" );
 		$xhtml_content = file_get_contents( $exporter->getOutputPath() );
 
 		$this->assertContains( '<span class="footnote">', $xhtml_content );
@@ -388,12 +411,53 @@ class Modules_ExportTest extends \WP_UnitTestCase {
 		$css_file = Container::get( 'Sass' )->pathToUserGeneratedCss() . "/prince-$timestamp.css";
 		\Pressbooks\Utility\put_contents( $css_file, $css );
 
-		$exporter = new \Pressbooks\Modules\Export\Xhtml\Xhtml11( [] );
-		$this->assertTrue( $exporter->convert() );
-		$this->assertTrue( $exporter->validate() );
+		$module = '\Pressbooks\Modules\Export\Xhtml\Xhtml11';
+		$exporter = new $module( [] );
+		$this->assertTrue( $exporter->convert(), "Could not convert with {$module}" );
+		$this->assertTrue( $exporter->validate(), "Could not validate with {$module}" );
 		$xhtml_content = file_get_contents( $exporter->getOutputPath() );
 		$url = network_home_url( sprintf( '/wp-content/uploads/sites/%d/pressbooks/css/prince-', get_current_blog_id() ) );
 		$this->assertContains( "<link rel='stylesheet' href='$url", $xhtml_content );
 		unlink( $exporter->getOutputPath() );
+	}
+
+	/**
+	 * @dataProvider moduleProviderHtml
+	 */
+	public function test_sanityCheckOptimizeForPrint( $module, $prerequisite ) {
+		$this->_book();
+		$meta_post = ( new \Pressbooks\Metadata() )->getMetaPost();
+		( new \Pressbooks\Contributors() )->insert( 'Ned Zimmerman', $meta_post->ID );
+		$user_id = $this->factory()->user->create( [ 'role' => 'contributor' ] );
+		wp_set_current_user( $user_id );
+		$modules = ( $prerequisite ) ? [ $prerequisite, $module ] : [ $module ];
+
+		$_GET['optimize-for-print'] = 1;
+		foreach ( $modules as $format ) {
+			/** @var \Pressbooks\Modules\Export\Export $exporter */
+			$exporter = new $format( [] );
+			$this->assertTrue( $exporter->convert(), "Could not convert with {$module}" );
+			$dom = new \DOMDocument();
+			libxml_use_internal_errors( true );
+			$dom->loadHTMLFile( $exporter->getOutputPath(), LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD );
+			libxml_clear_errors();
+			$sections = $dom->getElementsByTagName( 'body' );
+			$this->assertContains( 'print', $sections[0]->getAttribute( 'class' ) );
+			unlink( $exporter->getOutputPath() );
+		}
+
+		$_GET['optimize-for-print'] = 0;
+		foreach ( $modules as $format ) {
+			/** @var \Pressbooks\Modules\Export\Export $exporter */
+			$exporter = new $format( [] );
+			$this->assertTrue( $exporter->convert(), "Could not convert with {$module}" );
+			$dom = new \DOMDocument();
+			libxml_use_internal_errors( true );
+			$dom->loadHTMLFile( $exporter->getOutputPath(), LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD );
+			libxml_clear_errors();
+			$sections = $dom->getElementsByTagName( 'body' );
+			$this->assertNotContains( 'print', $sections[0]->getAttribute( 'class' ) );
+			unlink( $exporter->getOutputPath() );
+		}
 	}
 }

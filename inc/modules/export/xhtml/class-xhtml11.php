@@ -7,13 +7,16 @@
 namespace Pressbooks\Modules\Export\Xhtml;
 
 use function Pressbooks\Sanitize\clean_filename;
-use Masterminds\HTML5;
+use function Pressbooks\Utility\str_starts_with;
 use PressbooksMix\Assets;
 use Pressbooks\Container;
+use Pressbooks\HtmlParser;
 use Pressbooks\Modules\Export\Export;
 use Pressbooks\Sanitize;
 
 class Xhtml11 extends Export {
+
+	const TRANSIENT = 'pressbooks_export_xhtml_buffer_inner_html';
 
 	/**
 	 * Prettify HTML
@@ -66,18 +69,20 @@ class Xhtml11 extends Export {
 	protected $wrapHeaderElements = false;
 
 	/**
+	 * Should the short title be output in a hidden element? Requires a theme based on Buckram 1.2.0 or greater.
+	 *
+	 * @see https://github.com/pressbooks/buckram/
+	 *
+	 * @var bool
+	 */
+	protected $outputShortTitle = true;
+
+	/**
 	 * Main language of document, two letter code
 	 *
 	 * @var string
 	 */
 	protected $lang = 'en';
-
-	/**
-	 * Body class for the document
-	 *
-	 * @var string
-	 */
-	protected $bodyClass = '';
 
 	/**
 	 * @var \Pressbooks\Taxonomy
@@ -103,6 +108,10 @@ class Xhtml11 extends Export {
 			$this->wrapHeaderElements = true;
 		}
 
+		if ( Container::get( 'Styles' )->hasBuckram( '1.2.0' ) ) {
+			$this->outputShortTitle = false;
+		}
+
 		if ( ! defined( 'PB_XMLLINT_COMMAND' ) ) {
 			define( 'PB_XMLLINT_COMMAND', '/usr/bin/xmllint' );
 		}
@@ -117,11 +126,7 @@ class Xhtml11 extends Export {
 		$md5 = $this->nonce( $timestamp );
 		$this->url = home_url() . "/format/xhtml?timestamp={$timestamp}&hashkey={$md5}";
 		if ( ! empty( $_REQUEST['preview'] ) ) {
-			$this->url .= '&' . http_build_query(
-				[
-					'preview' => $_REQUEST['preview'],
-				]
-			);
+			$this->url .= '&preview=1';
 		}
 
 		// Append endnotes to URL?
@@ -194,7 +199,7 @@ class Xhtml11 extends Export {
 	/**
 	 * Procedure for "format/xhtml" rewrite rule.
 	 *
-	 * Supported http params:
+	 * Supported http (aka $_GET) params:
 	 *
 	 *   + timestamp: (int) combines with `hashkey` to allow a 3rd party service temporary access
 	 *   + hashkey: (string) combines with `timestamp` to allow a 3rd party service temporary access
@@ -202,15 +207,12 @@ class Xhtml11 extends Export {
 	 *   + style: (string) name of a user generated stylesheet you want included in the header
 	 *   + script: (string) name of javascript file you you want included in the header
 	 *   + preview: (bool) Use `Content-Disposition: inline` instead of `Content-Disposition: attachment` when passing through Export::formSubmit
-	 *   + fullsize-images: (bool) replace images with originals when possible
+	 *   + optimize-for-print: (bool) Replace images with originals when possible, add class="print" to <body>, and other print specific tweaks
 	 *
 	 * @see \Pressbooks\Redirect\do_format
 	 *
-	 * @param bool $return (optional)
-	 * If you would like to capture the output of transform,
-	 * use the return parameter. If this parameter is set
-	 * to true, transform will return its output, instead of
-	 * printing it.
+	 * @param bool $return (optional) If you would like to capture the output of transform, use the return parameter. If this parameter is set
+	 * to true, transform will return its output, instead of printing it.
 	 *
 	 * @return mixed
 	 */
@@ -246,6 +248,9 @@ class Xhtml11 extends Export {
 			list( $this->lang ) = explode( '-', $metadata['pb_language'] );
 		}
 
+		// ------------------------------------------------------------------------------------------------------------
+		// Buffer for Outer XHTML
+
 		ob_start();
 
 		$this->echoDocType( $book_contents, $metadata );
@@ -259,7 +264,7 @@ class Xhtml11 extends Export {
 
 		echo '<title>' . get_bloginfo( 'name' ) . "</title>\n";
 
-		if ( is_super_admin( get_current_user_id() ) || WP_DEBUG ) {
+		if ( current_user_can( 'edit_posts' ) ) {
 			if ( ! empty( $_GET['debug'] ) ) {
 				$assets = new Assets( 'pressbooks', 'plugin' );
 				$css = ( $_GET['debug'] === 'prince' ) ? $this->getLatestExportStyleUrl( 'prince' ) : false;
@@ -277,7 +282,6 @@ class Xhtml11 extends Export {
 				echo "<link rel='stylesheet' href='$url' type='text/css' />\n";
 			}
 		}
-
 		if ( ! empty( $_GET['script'] ) ) {
 			$url = $this->getExportScriptUrl( clean_filename( $_GET['script'] ) ) . '/script.js';
 			if ( $url ) {
@@ -285,56 +289,75 @@ class Xhtml11 extends Export {
 			}
 		}
 
-		echo "</head>\n<body lang='{$this->lang}'>\n";
+		echo "</head>\n<body lang='{$this->lang}' ";
+		if ( ! empty( $_GET['optimize-for-print'] ) ) {
+			echo "class='print' ";
+		}
+		echo ">\n";
 		$replace_token = uniqid( 'PB_REPLACE_INNER_HTML_', true );
 		echo $replace_token;
 		echo "\n</body>\n</html>";
 
-		$buffer_outter_html = ob_get_clean();
-		ob_start();
+		$buffer_outer_html = ob_get_clean();
 
-		// Before Title Page
-		$this->echoBeforeTitle( $book_contents, $metadata );
+		// ------------------------------------------------------------------------------------------------------------
+		// Buffer for Inner XHTML
 
-		// Half-title
-		$this->echoHalfTitle( $book_contents, $metadata );
+		$my_get = $_GET;
+		unset( $my_get['timestamp'], $my_get['hashkey'] );
+		$cache = get_transient( self::TRANSIENT );
+		if ( is_array( $cache ) && isset( $cache[0] ) && $cache[0] === md5( wp_json_encode( $my_get ) ) ) {
+			// The $_GET parameters haven't changed since the last request so the output will be the same
+			$buffer_inner_html = $cache[1];
+		} else {
+			ob_start();
 
-		// Cover
-		$this->echoCover( $book_contents, $metadata );
+			// Before Title Page
+			$this->echoBeforeTitle( $book_contents, $metadata );
 
-		// Title
-		$this->echoTitle( $book_contents, $metadata );
+			// Half-title
+			$this->echoHalfTitle( $book_contents, $metadata );
 
-		// Copyright
-		$this->echoCopyright( $book_contents, $metadata );
+			// Cover
+			$this->echoCover( $book_contents, $metadata );
 
-		// Dedication and Epigraph (In that order!)
-		$this->echoDedicationAndEpigraph( $book_contents, $metadata );
+			// Title
+			$this->echoTitle( $book_contents, $metadata );
 
-		// Table of contents
-		$this->echoToc( $book_contents, $metadata );
+			// Copyright
+			$this->echoCopyright( $book_contents, $metadata );
 
-		// Front-matter
-		$this->echoFrontMatter( $book_contents, $metadata );
+			// Dedication and Epigraph (In that order!)
+			$this->echoDedicationAndEpigraph( $book_contents, $metadata );
 
-		// Promo
-		$this->createPromo( $book_contents, $metadata );
+			// Table of contents
+			$this->echoToc( $book_contents, $metadata );
 
-		// Parts, Chapters
-		$this->echoPartsAndChapters( $book_contents, $metadata );
+			// Front-matter
+			$this->echoFrontMatter( $book_contents, $metadata );
 
-		// Back-matter
-		$this->echoBackMatter( $book_contents, $metadata );
+			// Promo
+			$this->createPromo( $book_contents, $metadata );
 
-		$buffer_inner_html = ob_get_clean();
+			// Parts, Chapters
+			$this->echoPartsAndChapters( $book_contents, $metadata );
 
-		if ( $this->tidy ) {
-			$buffer_inner_html = Sanitize\prettify( $buffer_inner_html );
+			// Back-matter
+			$this->echoBackMatter( $book_contents, $metadata );
+
+			$buffer_inner_html = ob_get_clean();
+
+			if ( $this->tidy ) {
+				$buffer_inner_html = Sanitize\prettify( $buffer_inner_html );
+			}
+
+			// Put the $_GET parameters and the buffer in a transient
+			set_transient( self::TRANSIENT, [ md5( wp_json_encode( $my_get ) ), $buffer_inner_html ] );
 		}
 
 		// Put inner HTML inside outer HTML
-		$pos = strpos( $buffer_outter_html, $replace_token );
-		$buffer = substr_replace( $buffer_outter_html, $buffer_inner_html, $pos, strlen( $replace_token ) );
+		$pos = strpos( $buffer_outer_html, $replace_token );
+		$buffer = substr_replace( $buffer_outer_html, $buffer_inner_html, $pos, strlen( $replace_token ) );
 
 		if ( $return ) {
 			return $buffer;
@@ -499,12 +522,12 @@ class Xhtml11 extends Export {
 	 * @return string
 	 */
 	protected function preProcessPostContent( $content ) {
-
-		$content = apply_filters( 'the_content', $content );
+		$content = apply_filters( 'the_export_content', $content );
+		$content = str_ireplace( [ '<b></b>', '<i></i>', '<strong></strong>', '<em></em>' ], '', $content );
 		$content = $this->fixAnnoyingCharacters( $content ); // is this used?
 		$content = $this->fixInternalLinks( $content );
 		$content = $this->switchLaTexFormat( $content );
-		if ( ! empty( $_GET['fullsize-images'] ) ) {
+		if ( ! empty( $_GET['optimize-for-print'] ) ) {
 			$content = $this->fixImages( $content );
 		}
 		$content = $this->tidy( $content );
@@ -517,7 +540,7 @@ class Xhtml11 extends Export {
 	 *
 	 * @param string $content The section content.
 	 *
-	 * @returns string
+	 * @return string
 	 */
 	protected function switchLaTexFormat( $content ) {
 		$content = preg_replace( '/(quicklatex.com-[a-f0-9]{32}_l3.)(png)/i', '$1svg', $content );
@@ -526,24 +549,54 @@ class Xhtml11 extends Export {
 	}
 
 	/**
-	 * @param string $content
+	 * @param string $source_content
 	 *
 	 * @return string
 	 */
-	protected function fixInternalLinks( $content ) {
-		// takes care of PB subdirectory installations of PB
-		$content = preg_replace( '/href\="\/([a-z0-9]*)\/(front\-matter|chapter|back\-matter|part)\/([a-z0-9\-]*)([\/]?)(\#[a-z0-9\-]*)"/', 'href="$5"', $content );
-		$content = preg_replace( '/href\="\/([a-z0-9]*)\/(front\-matter|chapter|back\-matter|part)\/([a-z0-9\-]*)([\/]?)"/', 'href="#$2-$3"', $content );
+	protected function fixInternalLinks( $source_content ) {
 
-		// takes care of PB subdomain installations of PB
-		$content = preg_replace( '/href\="\/(front\-matter|chapter|back\-matter|part)\/([a-z0-9\-]*)([\/]?)(\#[a-z0-9\-]*)"/', 'href="$4"', $content );
-		$output = preg_replace( '/href\="\/(front\-matter|chapter|back\-matter|part)\/([a-z0-9\-]*)([\/]?)"/', 'href="#$1-$2"', $content );
+		if ( stripos( $source_content, '<a' ) === false ) {
+			// There are no <a> tags to look at, skip this
+			return $source_content;
+		}
 
-		return $output;
+		$home_url = rtrim( home_url(), '/' );
+		$html5 = new HtmlParser();
+		$dom = $html5->loadHTML( $source_content );
+		$links = $dom->getElementsByTagName( 'a' );
+
+		$changed = false;
+		foreach ( $links as $link ) {
+			/** @var \DOMElement $link */
+			$href = $link->getAttribute( 'href' );
+			if ( str_starts_with( $href, '/' ) || str_starts_with( $href, $home_url ) ) {
+				$pos = strpos( $href, '#' );
+				if ( $pos !== false ) {
+					// Use the #fragment
+					$fragment = substr( $href, strpos( $href, '#' ) + 1 );
+				} elseif ( preg_match( '%(front\-matter|chapter|back\-matter|part)/([a-z0-9\-]*)([/]?)%', $href, $matches ) ) {
+					// Convert type + slug to #fragment
+					$fragment = "{$matches[1]}-{$matches[2]}";
+				} else {
+					$fragment = false;
+				}
+				if ( $fragment ) {
+					$link->setAttribute( 'href', "#{$fragment}" );
+					$changed = true;
+				}
+			}
+		}
+
+		if ( ! $changed ) {
+			return $source_content;
+		} else {
+			$content = $html5->saveHTML( $dom );
+			return $content;
+		}
 	}
 
 	/**
-	 * Removes the CC attribution link.
+	 * Removes the CC attribution link. Returns valid xhtml.
 	 *
 	 * @since 4.1
 	 *
@@ -552,7 +605,13 @@ class Xhtml11 extends Export {
 	 * @return string
 	 */
 	protected function removeAttributionLink( $content ) {
-		$html5 = new HTML5();
+		if ( stripos( $content, '<a' ) === false ) {
+			// There are no <a> tags to look at, skip this
+			return $content;
+		}
+
+		$changed = false;
+		$html5 = new HtmlParser();
 		$dom = $html5->loadHTML( $content );
 
 		$urls = $dom->getElementsByTagName( 'a' );
@@ -564,13 +623,17 @@ class Xhtml11 extends Export {
 					$dom->createTextNode( $url->nodeValue ),
 					$url
 				);
+				$changed = true;
 			}
 		}
 
-		$content = $html5->saveHTML( $dom );
-		$content = \Pressbooks\Sanitize\strip_container_tags( $content );
-
-		return $content;
+		if ( ! $changed ) {
+			return $content;
+		} else {
+			$content = $html5->saveHTML( $dom );
+			$content = \Pressbooks\HtmLawed::filter( $content, [ 'valid_xhtml' => 1 ] );
+			return $content;
+		}
 	}
 
 	/**
@@ -586,7 +649,7 @@ class Xhtml11 extends Export {
 		static $already_done = [];
 
 		$changed = false;
-		$html5 = new HTML5();
+		$html5 = new HtmlParser();
 		$dom = $html5->loadHTML( $content );
 
 		$images = $dom->getElementsByTagName( 'img' );
@@ -608,7 +671,6 @@ class Xhtml11 extends Export {
 
 		if ( $changed ) {
 			$content = $html5->saveHTML( $dom );
-			$content = \Pressbooks\Sanitize\strip_container_tags( $content );
 		}
 
 		return $content;
@@ -635,7 +697,11 @@ class Xhtml11 extends Export {
 			'tidy' => -1,
 		];
 
-		return \Pressbooks\HtmLawed::filter( $html, $config );
+		$spec = '';
+		$spec .= 'table=-border;';
+		$spec .= 'div=title;';
+
+		return \Pressbooks\HtmLawed::filter( $html, $config, $spec );
 	}
 
 
@@ -966,7 +1032,7 @@ class Xhtml11 extends Export {
 
 						echo '</a>';
 
-						if ( \Pressbooks\Modules\Export\Export::isParsingSubsections() === true ) {
+						if ( \Pressbooks\Modules\Export\Export::shouldParseSubsections() === true ) {
 							$sections = \Pressbooks\Book::getSubsections( $chapter['ID'] );
 							if ( $sections ) {
 								echo '<ul class="sections">';
@@ -1035,7 +1101,7 @@ class Xhtml11 extends Export {
 
 					echo '</a>';
 
-					if ( \Pressbooks\Modules\Export\Export::isParsingSubsections() === true ) {
+					if ( \Pressbooks\Modules\Export\Export::shouldParseSubsections() === true ) {
 						$sections = \Pressbooks\Book::getSubsections( $val['ID'] );
 						if ( $sections ) {
 							echo '<ul class="sections">';
@@ -1060,9 +1126,9 @@ class Xhtml11 extends Export {
 	 * @param array $metadata
 	 */
 	protected function echoFrontMatter( $book_contents, $metadata ) {
-		$front_matter_printf = '<div class="front-matter %1$s" id="%2$s">';
-		$front_matter_printf .= '<div class="front-matter-title-wrap"><h3 class="front-matter-number">%3$s</h3><h1 class="front-matter-title">%4$s</h1>%5$s</div>';
-		$front_matter_printf .= '<div class="ugc front-matter-ugc">%6$s</div>%7$s%8$s';
+		$front_matter_printf = '<div class="front-matter %1$s" id="%2$s" title="%3$s">';
+		$front_matter_printf .= '<div class="front-matter-title-wrap"><h3 class="front-matter-number">%4$s</h3><h1 class="front-matter-title">%5$s</h1>%6$s</div>';
+		$front_matter_printf .= '<div class="ugc front-matter-ugc">%7$s</div>%8$s%9$s';
 		$front_matter_printf .= '</div>';
 
 		$i = $this->frontMatterPos;
@@ -1096,10 +1162,10 @@ class Xhtml11 extends Export {
 			$subtitle = trim( get_post_meta( $front_matter_id, 'pb_subtitle', true ) );
 			$author = $this->contributors->get( $front_matter_id, 'pb_authors' );
 
-			if ( \Pressbooks\Modules\Export\Export::isParsingSubsections() === true ) {
-				$sections = \Pressbooks\Book::getSubsections( $front_matter_id );
-				if ( $sections ) {
+			if ( \Pressbooks\Modules\Export\Export::shouldParseSubsections() === true ) {
+				if ( \Pressbooks\Book::getSubsections( $front_matter_id ) !== false ) {
 					$content = \Pressbooks\Book::tagSubsections( $content, $front_matter_id );
+					$content = \Pressbooks\HtmLawed::filter( $content, [ 'valid_xhtml' => 1 ] );
 				}
 			}
 
@@ -1119,7 +1185,7 @@ class Xhtml11 extends Export {
 				}
 			}
 
-			if ( $short_title ) {
+			if ( $short_title && $this->outputShortTitle ) {
 				if ( $this->wrapHeaderElements ) {
 					$after_title = '<h6 class="short-title">' . Sanitize\decode( $short_title ) . '</h6>' . $after_title;
 				} else {
@@ -1133,6 +1199,7 @@ class Xhtml11 extends Export {
 				$front_matter_printf,
 				$subclass,
 				$slug,
+				( $short_title ) ? $short_title : $front_matter['post_title'],
 				$i,
 				Sanitize\decode( $title ),
 				$after_title,
@@ -1170,9 +1237,9 @@ class Xhtml11 extends Export {
 		$part_printf .= '<div class="part-title-wrap"><h3 class="part-number">%3$s</h3><h1 class="part-title">%4$s</h1></div>%5$s';
 		$part_printf .= '</div>';
 
-		$chapter_printf = '<div class="chapter %1$s" id="%2$s">';
-		$chapter_printf .= '<div class="chapter-title-wrap"><h3 class="chapter-number">%3$s</h3><h2 class="chapter-title">%4$s</h2>%5$s</div>';
-		$chapter_printf .= '<div class="ugc chapter-ugc">%6$s</div>%7$s%8$s';
+		$chapter_printf = '<div class="chapter %1$s" id="%2$s" title="%3$s">';
+		$chapter_printf .= '<div class="chapter-title-wrap"><h3 class="chapter-number">%4$s</h3><h2 class="chapter-title">%5$s</h2>%6$s</div>';
+		$chapter_printf .= '<div class="ugc chapter-ugc">%7$s</div>%8$s%9$s';
 		$chapter_printf .= '</div>';
 
 		$i = 1;
@@ -1205,7 +1272,6 @@ class Xhtml11 extends Export {
 
 			// Inject part content?
 			if ( $part_content ) {
-				$part_content = $this->preProcessPostContent( $part_content );
 				if ( $part_printf_changed ) {
 					$part_printf_changed = str_replace( '</h1></div>%s</div>', '</h1></div><div class="ugc part-ugc">%s</div></div>', $part_printf_changed );
 				} else {
@@ -1242,10 +1308,10 @@ class Xhtml11 extends Export {
 				$subtitle = trim( get_post_meta( $chapter_id, 'pb_subtitle', true ) );
 				$author = $this->contributors->get( $chapter_id, 'pb_authors' );
 
-				if ( \Pressbooks\Modules\Export\Export::isParsingSubsections() === true ) {
-					$sections = \Pressbooks\Book::getSubsections( $chapter_id );
-					if ( $sections ) {
+				if ( \Pressbooks\Modules\Export\Export::shouldParseSubsections() === true ) {
+					if ( \Pressbooks\Book::getSubsections( $chapter_id ) !== false ) {
 						$content = \Pressbooks\Book::tagSubsections( $content, $chapter_id );
+						$content = \Pressbooks\HtmLawed::filter( $content, [ 'valid_xhtml' => 1 ] );
 					}
 				}
 
@@ -1265,7 +1331,7 @@ class Xhtml11 extends Export {
 					}
 				}
 
-				if ( $short_title ) {
+				if ( $short_title && $this->outputShortTitle ) {
 					if ( $this->wrapHeaderElements ) {
 						$after_title = '<h6 class="short-title">' . Sanitize\decode( $short_title ) . '</h6>' . $after_title;
 					} else {
@@ -1281,12 +1347,13 @@ class Xhtml11 extends Export {
 
 				$append_chapter_content .= $this->removeAttributionLink( $this->doSectionLevelLicense( $metadata, $chapter_id ) );
 
-				$n = ( strpos( $subclass, 'numberless' ) === false ) ? $j : '';
+				$my_chapter_number = ( strpos( $subclass, 'numberless' ) === false ) ? $j : '';
 				$my_chapters .= sprintf(
 					$chapter_printf,
 					$subclass,
 					$slug,
-					$n,
+					( $short_title ) ? $short_title : $chapter['post_title'],
+					$my_chapter_number,
 					Sanitize\decode( $title ),
 					$after_title,
 					$content,
@@ -1294,7 +1361,7 @@ class Xhtml11 extends Export {
 					$this->doEndnotes( $chapter_id )
 				) . "\n";
 
-				if ( 'numberless' !== $subclass ) {
+				if ( $my_chapter_number !== '' ) {
 					++$j;
 				}
 			}
@@ -1338,9 +1405,9 @@ class Xhtml11 extends Export {
 	 * @param array $metadata
 	 */
 	protected function echoBackMatter( $book_contents, $metadata ) {
-		$back_matter_printf = '<div class="back-matter %1$s" id="%2$s">';
-		$back_matter_printf .= '<div class="back-matter-title-wrap"><h3 class="back-matter-number">%3$s</h3><h1 class="back-matter-title">%4$s</h1>%5$s</div>';
-		$back_matter_printf .= '<div class="ugc back-matter-ugc">%6$s</div>%7$s%8$s';
+		$back_matter_printf = '<div class="back-matter %1$s" id="%2$s" title="%3$s">';
+		$back_matter_printf .= '<div class="back-matter-title-wrap"><h3 class="back-matter-number">%4$s</h3><h1 class="back-matter-title">%5$s</h1>%6$s</div>';
+		$back_matter_printf .= '<div class="ugc back-matter-ugc">%7$s</div>%8$s%9$s';
 		$back_matter_printf .= '</div>';
 
 		$i = 1;
@@ -1361,10 +1428,10 @@ class Xhtml11 extends Export {
 			$subtitle = trim( get_post_meta( $back_matter_id, 'pb_subtitle', true ) );
 			$author = $this->contributors->get( $back_matter_id, 'pb_authors' );
 
-			if ( \Pressbooks\Modules\Export\Export::isParsingSubsections() === true ) {
-				$sections = \Pressbooks\Book::getSubsections( $back_matter_id );
-				if ( $sections ) {
+			if ( \Pressbooks\Modules\Export\Export::shouldParseSubsections() === true ) {
+				if ( \Pressbooks\Book::getSubsections( $back_matter_id ) !== false ) {
 					$content = \Pressbooks\Book::tagSubsections( $content, $back_matter_id );
+					$content = \Pressbooks\HtmLawed::filter( $content, [ 'valid_xhtml' => 1 ] );
 				}
 			}
 
@@ -1384,7 +1451,7 @@ class Xhtml11 extends Export {
 				}
 			}
 
-			if ( $short_title ) {
+			if ( $short_title && $this->outputShortTitle ) {
 				if ( $this->wrapHeaderElements ) {
 					$after_title = '<h6 class="short-title">' . Sanitize\decode( $short_title ) . '</h6>' . $after_title;
 				} else {
@@ -1398,6 +1465,7 @@ class Xhtml11 extends Export {
 				$back_matter_printf,
 				$subclass,
 				$slug,
+				( $short_title ) ? $short_title : $back_matter['post_title'],
 				$i,
 				Sanitize\decode( $title ),
 				$after_title,

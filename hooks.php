@@ -57,11 +57,12 @@ add_filter( 'rest_index', '\Pressbooks\Api\add_help_link' );
 
 if ( $is_book ) {
 	add_action( 'rest_api_init', '\Pressbooks\Api\init_book' );
-	add_filter( 'rest_endpoints', 'Pressbooks\Api\hide_endpoints_from_book' );
-	add_filter( 'rest_url', 'Pressbooks\Api\fix_book_urls', 10, 2 );
+	add_filter( 'rest_endpoints', '\Pressbooks\Api\hide_endpoints_from_book' );
+	add_filter( 'rest_url', '\Pressbooks\Api\fix_book_urls', 10, 2 );
+	add_filter( 'rest_prepare_attachment', '\Pressbooks\Api\fix_attachment', 10, 3 );
 } elseif ( $enable_network_api ) {
 	add_action( 'rest_api_init', '\Pressbooks\Api\init_root' );
-	add_filter( 'rest_endpoints', 'Pressbooks\Api\hide_endpoints_from_root' );
+	add_filter( 'rest_endpoints', '\Pressbooks\Api\hide_endpoints_from_root' );
 }
 
 // -------------------------------------------------------------------------------------------------------------------
@@ -111,6 +112,8 @@ if ( $is_book && use_book_locale() ) {
 // -------------------------------------------------------------------------------------------------------------------
 
 add_action( 'init', '\Pressbooks\Sanitize\allow_post_content' );
+add_filter( 'the_content', '\Pressbooks\Sanitize\sanitize_webbook_content' );
+add_filter( 'the_export_content', '\Pressbooks\Sanitize\filter_export_content' );
 
 // -------------------------------------------------------------------------------------------------------------------
 // Images
@@ -143,6 +146,7 @@ if ( $is_book ) {
 	add_action( 'init', '\Pressbooks\PostType\register_post_statii' );
 	add_filter( 'request', '\Pressbooks\PostType\add_post_types_rss' );
 	add_filter( 'hypothesis_supported_posttypes', '\Pressbooks\PostType\add_posttypes_to_hypothesis' );
+	add_filter( 'pb_post_type_label', '\Pressbooks\PostType\filter_post_type_label', 10, 2 );
 }
 
 // -------------------------------------------------------------------------------------------------------------------

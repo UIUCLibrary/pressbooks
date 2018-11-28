@@ -23,15 +23,46 @@ use Pressbooks\Metadata;
  * Add a custom message in admin footer
  */
 function add_footer_link() {
-
 	printf(
-		'<p id="footer-left" class="alignleft"><span id="footer-thankyou">%s <a href="http://pressbooks.com">Pressbooks</a></span> &bull; <a href="http://pressbooks.com/about">%s</a> &bull; <a href="http://pressbooks.com/help">%s</a> &bull; <a href="%s">%s</a> &bull; <a href="http://pressbooks.com/contact">%s</a></p>',
-		__( 'Powered by', 'pressbooks' ),
-		__( 'About', 'pressbooks' ),
-		__( 'Help', 'pressbooks' ),
-		admin_url( 'options.php?page=pressbooks_diagnostics' ),
-		__( 'Diagnostics', 'pressbooks' ),
-		__( 'Contact', 'pressbooks' )
+		'<p id="footer-left" class="alignleft"><span id="footer-thankyou">%1$s</span> &bull; %2$s &bull; %3$s &bull; %4$s &bull; %5$s</p>',
+		sprintf(
+			__( 'Powered by %s', 'pressbooks' ),
+			sprintf(
+				'<a href="%1$s">%2$s</a>',
+				'https://pressbooks.com/',
+				'Pressbooks'
+			)
+		),
+		sprintf(
+			'<a href="%1$s">%2$s</a>',
+			'https://pressbooks.com/about/',
+			__( 'About', 'pressbooks' )
+		),
+		sprintf(
+			'<a href="%1$s">%2$s</a>',
+			/**
+			 * Filter the "Help" link.
+			 *
+			 * @since 5.6.0
+			 */
+			apply_filters( 'pb_help_link', 'https://pressbooks.community/' ),
+			__( 'Help', 'pressbooks' )
+		),
+		sprintf(
+			'<a href="%1$s">%2$s</a>',
+			admin_url( 'options.php?page=pressbooks_diagnostics' ),
+			__( 'Diagnostics', 'pressbooks' )
+		),
+		sprintf(
+			'<a href="%1$s">%2$s</a>',
+			/**
+			 * Filter the "Contact" link.
+			 *
+			 * @since 5.6.0
+			 */
+			apply_filters( 'pb_contact_link', 'https://pressbooks.org/get-involved/' ),
+			__( 'Contact', 'pressbooks' )
+		)
 	);
 }
 
@@ -181,6 +212,22 @@ function replace_book_admin_menu() {
 
 	add_submenu_page( 'pb_organize', __( 'Trash' ), __( 'Trash' ), 'delete_posts', 'pb_trash', __NAMESPACE__ . '\display_trash' );
 
+	add_action(
+		'admin_enqueue_scripts', function ( $hook ) {
+			if ( 'post-new.php' === $hook || 'post.php' === $hook ) {
+				$post_type = get_post_type();
+				if ( in_array( $post_type, [ 'front-matter', 'chapter', 'back-matter' ], true ) ) {
+					// post-visibility.js
+					wp_enqueue_script( 'pb-post-visibility' );
+				}
+				if ( in_array( $post_type, [ 'back-matter' ], true ) ) {
+					// post-back-matter.js
+					wp_enqueue_script( 'pb-post-back-matter' );
+				}
+			}
+		}
+	);
+
 	// Book Information
 	$book_info_url = book_info_slug();
 	$bookinfo_page = add_menu_page( __( 'Book Info', 'pressbooks' ), __( 'Book Info', 'pressbooks' ), 'manage_options', $book_info_url, '', 'dashicons-info', 12 );
@@ -197,9 +244,6 @@ function replace_book_admin_menu() {
 							'selectSubjectsText' => __( 'Choose some subject(s)…', 'pressbooks' ),
 						]
 					);
-				}
-				if ( in_array( get_post_type(), [ 'front-matter', 'chapter', 'back-matter' ], true ) ) {
-					wp_enqueue_script( 'pb-post-visibility' );
 				}
 			}
 		}
@@ -228,7 +272,7 @@ function replace_book_admin_menu() {
 	$option = get_option( 'pressbooks_ecommerce_links', PublishOptions::getDefaults() );
 	$page = new PublishOptions( $option );
 	$page->init();
-	wp_cache_delete( 'pressbooks_ecommerce_links_version', 'options' );
+	wp_cache_delete( 'pressbooks_ecommerce_links_version', 'options' ); // WordPress Core caches this key in the "options" group
 	$version = get_option( 'pressbooks_ecommerce_links_version', 0 );
 	if ( $version < $page::VERSION ) {
 		$page->upgrade( $version );
@@ -237,21 +281,14 @@ function replace_book_admin_menu() {
 
 	add_menu_page( __( 'Publish', 'pressbooks' ), __( 'Publish', 'pressbooks' ), 'edit_posts', 'pb_publish', [ $page, 'render' ], 'dashicons-products', 16 );
 
-	/**
-	 * Filter the ability to manage webbook privacy and related settings (default true).
-	 *
-	 * @since 5.4.0
-	 */
-	if ( apply_filters( 'pb_permissive_webbooks', true ) ) {
-		// Privacy
-		add_options_page( __( 'Sharing and Privacy Settings', 'pressbooks' ), __( 'Sharing &amp; Privacy', 'pressbooks' ), 'manage_options', 'pressbooks_sharingandprivacy_options', __NAMESPACE__ . '\display_privacy_settings' );
-	}
+	// Privacy
+	add_options_page( __( 'Sharing and Privacy Settings', 'pressbooks' ), __( 'Sharing &amp; Privacy', 'pressbooks' ), 'manage_options', 'pressbooks_sharingandprivacy_options', __NAMESPACE__ . '\display_privacy_settings' );
 
 	// Export
 	$option = get_option( 'pressbooks_export_options', ExportOptions::getDefaults() );
 	$page = new ExportOptions( $option );
 	$page->init();
-	wp_cache_delete( 'pressbooks_export_options_version', 'options' );
+	wp_cache_delete( 'pressbooks_export_options_version', 'options' );  // WordPress Core caches this key in the "options" group
 	$version = get_option( 'pressbooks_export_options_version', 0 );
 	if ( $version < $page::VERSION ) {
 		$page->upgrade( $version );
@@ -358,6 +395,11 @@ function fix_parent_file( $file ) {
 		'edit-tags.php?taxonomy=chapter-type',
 		'edit-tags.php?taxonomy=back-matter-type',
 		'edit-tags.php?taxonomy=glossary-type',
+		'edit.php?post_type=front-matter',
+		'edit.php?post_type=part',
+		'edit.php?post_type=chapter',
+		'edit.php?post_type=back-matter',
+		'edit.php?post_type=glossary',
 	];
 	foreach ( $haystack as $i ) {
 		if ( str_starts_with( $submenu_file, $i ) ) {
@@ -383,6 +425,30 @@ function fix_parent_file( $file ) {
 	}
 
 	return $file;
+}
+
+/**
+ * More menu output hacks
+ *
+ * @param string $submenu_file The submenu file.
+ * @param string $parent_file The submenu item's parent file.
+ *
+ * @return mixed
+ */
+function fix_submenu_file( $submenu_file, $parent_file ) {
+	$haystack = [
+		'edit.php?post_type=front-matter',
+		'edit.php?post_type=part',
+		'edit.php?post_type=chapter',
+		'edit.php?post_type=back-matter',
+	];
+	foreach ( $haystack as $i ) {
+		if ( str_starts_with( $submenu_file, $i ) ) {
+			return 'pb_organize';
+		}
+	}
+
+	return $submenu_file;
 }
 
 function network_admin_menu() {
@@ -473,7 +539,7 @@ function replace_menu_bar_branding( $wp_admin_bar ) {
 		[
 			'id' => 'wp-logo',
 			'title' => '<span class="ab-icon"></span>',
-			'href' => ( 'https://pressbooks.com/about' ),
+			'href' => ( 'https://pressbooks.com/about/' ),
 			'meta' => [
 				'title' => __( 'About Pressbooks', 'pressbooks' ),
 			],
@@ -487,7 +553,7 @@ function replace_menu_bar_branding( $wp_admin_bar ) {
 				'parent' => 'wp-logo',
 				'id' => 'about',
 				'title' => __( 'About Pressbooks', 'pressbooks' ),
-				'href' => 'https://pressbooks.com/about',
+				'href' => 'https://pressbooks.com/about/',
 			]
 		);
 	}
@@ -498,7 +564,7 @@ function replace_menu_bar_branding( $wp_admin_bar ) {
 			'parent' => 'wp-logo-external',
 			'id' => 'wporg',
 			'title' => __( 'Pressbooks.com', 'pressbooks' ),
-			'href' => 'https://pressbooks.com',
+			'href' => 'https://pressbooks.com/',
 		]
 	);
 
@@ -508,7 +574,12 @@ function replace_menu_bar_branding( $wp_admin_bar ) {
 			'parent' => 'wp-logo-external',
 			'id' => 'support-forums',
 			'title' => __( 'Help', 'pressbooks' ),
-			'href' => 'https://pressbooks.com/help',
+			/**
+			 * Filter the "Help" link.
+			 *
+			 * @since 5.6.0
+			 */
+			'href' => apply_filters( 'pb_help_link', 'https://pressbooks.community/' ),
 		]
 	);
 
@@ -518,7 +589,12 @@ function replace_menu_bar_branding( $wp_admin_bar ) {
 			'parent' => 'wp-logo-external',
 			'id' => 'contact',
 			'title' => __( 'Contact', 'pressbooks' ),
-			'href' => 'https://pressbooks.com/contact',
+			/**
+			 * Filter the "Contact" link.
+			 *
+			 * @since 5.6.0
+			 */
+			'href' => apply_filters( 'pb_contact_link', 'https://pressbooks.org/get-involved/' ),
 		]
 	);
 
@@ -920,6 +996,7 @@ function init_css_js() {
 	wp_register_script( 'pb-metadata', $assets->getPath( 'scripts/book-information.js' ), [ 'jquery' ], false, true );
 	wp_register_script( 'pb-import', $assets->getPath( 'scripts/import.js' ), [ 'jquery' ] );
 	wp_register_script( 'pb-post-visibility', $assets->getPath( 'scripts/post-visibility.js' ), [ 'jquery' ], false, true );
+	wp_register_script( 'pb-post-back-matter', $assets->getPath( 'scripts/post-back-matter.js' ), [ 'jquery', 'editor' ], false, true );
 
 	wp_register_style( 'pb-cloner', $assets->getPath( 'styles/cloner.css' ) );
 	wp_register_style( 'pb-export', $assets->getPath( 'styles/export.css' ) );
@@ -944,13 +1021,27 @@ function privacy_settings_init() {
 		__NAMESPACE__ . '\privacy_settings_section_callback',
 		'privacy_settings'
 	);
-	add_settings_field(
-		'blog_public',
-		__( 'Book Visibility', 'pressbooks' ),
-		__NAMESPACE__ . '\privacy_blog_public_callback',
-		'privacy_settings',
-		'privacy_settings_section'
-	);
+
+	/**
+	 * Filter the ability to manage webbook privacy and related settings (default true).
+	 *
+	 * @since 5.4.0
+	 */
+	if ( apply_filters( 'pb_permissive_webbooks', true ) ) {
+		add_settings_field(
+			'blog_public',
+			__( 'Book Visibility', 'pressbooks' ),
+			__NAMESPACE__ . '\privacy_blog_public_callback',
+			'privacy_settings',
+			'privacy_settings_section'
+		);
+		register_setting(
+			'privacy_settings',
+			'blog_public',
+			__NAMESPACE__ . '\privacy_blog_public_sanitize'
+		);
+	}
+
 	add_settings_field(
 		'permissive_private_content',
 		__( 'Private Content', 'pressbooks' ),
@@ -958,6 +1049,12 @@ function privacy_settings_init() {
 		'privacy_settings',
 		'privacy_settings_section'
 	);
+	register_setting(
+		'privacy_settings',
+		'permissive_private_content',
+		__NAMESPACE__ . '\privacy_permissive_private_content_sanitize'
+	);
+
 	add_settings_field(
 		'disable_comments',
 		__( 'Disable Comments', 'pressbooks' ),
@@ -965,6 +1062,12 @@ function privacy_settings_init() {
 		'privacy_settings',
 		'privacy_settings_section'
 	);
+	register_setting(
+		'privacy_settings',
+		'pressbooks_sharingandprivacy_options',
+		__NAMESPACE__ . '\privacy_disable_comments_sanitize'
+	);
+
 	$sharingandprivacy = get_site_option( 'pressbooks_sharingandprivacy_options' );
 	if ( ! empty( $sharingandprivacy['allow_redistribution'] ) ) {
 		add_settings_field(
@@ -974,28 +1077,12 @@ function privacy_settings_init() {
 			'privacy_settings',
 			'privacy_settings_section'
 		);
+		register_setting(
+			'privacy_settings',
+			'pbt_redistribute_settings',
+			__NAMESPACE__ . '\privacy_pbt_redistribute_settings_sanitize'
+		);
 	}
-	register_setting(
-		'privacy_settings',
-		'blog_public',
-		__NAMESPACE__ . '\privacy_blog_public_sanitize'
-	);
-	register_setting(
-		'privacy_settings',
-		'permissive_private_content',
-		__NAMESPACE__ . '\privacy_permissive_private_content_sanitize'
-	);
-	register_setting(
-		'privacy_settings',
-		'pressbooks_sharingandprivacy_options',
-		__NAMESPACE__ . '\privacy_disable_comments_sanitize'
-	);
-	register_setting(
-		'privacy_settings',
-		'pbt_redistribute_settings',
-		__NAMESPACE__ . '\privacy_pbt_redistribute_settings_sanitize'
-	);
-
 }
 
 

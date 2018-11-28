@@ -62,8 +62,28 @@ class Sass {
 	public function getStringsToLocalize() {
 
 		return [
-			'chapter' => __( 'Chapter', 'pressbooks' ),
-			'part' => __( 'Part', 'pressbooks' ),
+			/**
+			 * Filter the label used for post types (front matter/parts/chapters/back matter) in the TOC and section headings.
+			 *
+			 * @since 5.6.0
+			 *
+			 * @param string $label
+			 * @param array $args
+			 *
+			 * @return string Filtered label
+			 */
+			'chapter' => apply_filters( 'pb_post_type_label', __( 'Chapter', 'pressbooks' ), [ 'post_type' => 'chapter' ] ),
+			/**
+			 * Filter the label used for post types (front matter/parts/chapters/back matter) in the TOC and section headings.
+			 *
+			 * @since 5.6.0
+			 *
+			 * @param string $label
+			 * @param array $args
+			 *
+			 * @return string Filtered label
+			 */
+			'part' => apply_filters( 'pb_post_type_label', __( 'Part', 'pressbooks' ), [ 'post_type' => 'part' ] ),
 		];
 
 	}
@@ -88,7 +108,7 @@ class Sass {
 		 *
 		 * @since 4.4.0
 		 */
-		return apply_filters( 'pb_global_components_path', get_theme_root( 'pressbooks-book' ) . '/pressbooks-book/assets/book/styles/' );
+		return apply_filters( 'pb_global_components_path', get_theme_root( 'pressbooks-book' ) . '/pressbooks-book/packages/buckram/assets/styles/' );
 	}
 
 

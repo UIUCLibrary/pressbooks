@@ -15,7 +15,7 @@ namespace Pressbooks\Admin\Plugins;
  *
  * @param array $plugins
  *
- * @return array $plugins
+ * @return array
  */
 
 function filter_plugins( $plugins ) {
@@ -23,19 +23,28 @@ function filter_plugins( $plugins ) {
 		$slugs = [
 			'h5p',
 			'hypothesis',
+			'parsedown-party',
 			'tablepress',
 			'wp-quicklatex',
 		];
 		$approved = [];
-		foreach ( $slugs as $slug ) {
-			$approved[] = $slug . '/' . $slug . '.php';
-		}
 		foreach ( $plugins as $slug => $value ) {
-			if ( false === strpos( $slug, 'pressbooks-' ) && ! in_array( $slug, $approved, true ) ) {
-				unset( $plugins[ $slug ] );
+			if ( strpos( $slug, 'pressbooks-' ) !== false || in_array( explode( '/', $slug )[0], $slugs, true ) ) {
+				$approved[ $slug ] = $value;
 			}
 		}
+		return $approved;
 	}
 
+	return $plugins;
+}
+
+/**
+ * @param array $plugins
+ *
+ * @return array
+ */
+function hide_gutenberg( $plugins ) {
+	unset( $plugins['gutenberg/gutenberg.php'] );
 	return $plugins;
 }

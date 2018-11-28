@@ -7,6 +7,7 @@
 namespace Pressbooks;
 
 use function \Pressbooks\Utility\debug_error_log;
+use function \Pressbooks\Utility\oxford_comma_explode;
 
 /**
  * TODO: Refactor
@@ -46,12 +47,21 @@ class Licensing {
 		$supported = [
 			'public-domain' => [
 				'api' => [
+					'license' => 'mark',
+					'commercial' => 'y',
+					'derivatives' => 'y',
+				],
+				'url' => 'https://creativecommons.org/publicdomain/mark/1.0/',
+				'desc' => __( 'Public Domain', 'pressbooks' ),
+			],
+			'cc-zero' => [
+				'api' => [
 					'license' => 'zero',
 					'commercial' => 'y',
 					'derivatives' => 'y',
 				],
 				'url' => 'https://creativecommons.org/publicdomain/zero/1.0/',
-				'desc' => __( 'Public Domain (No Rights Reserved)', 'pressbooks' ),
+				'desc' => __( 'CC0 (Creative Commons Zero)', 'pressbooks' ),
 			],
 			'cc-by' => [
 				'api' => [
@@ -375,10 +385,10 @@ class Licensing {
 		} elseif ( $this->isSupportedType( $license ) ) {
 			$name = $this->getNameForLicense( $license );
 			$url  = $this->getUrlForLicense( $license );
-			if ( \Pressbooks\Utility\str_starts_with( $license, 'cc' ) ) {
+			if ( \Pressbooks\Utility\str_starts_with( $license, 'cc' ) && $license !== 'cc-zero' ) {
 				return sprintf(
 					'<div class="license-attribution"><p>%1$s</p><p>%2$s</p></div>',
-					sprintf( '<img src="%1$s" alt="%2$s" />', get_template_directory_uri() . '/assets/book/images/' . $license . '.svg', sprintf( __( 'Icon for the %s', 'pressbooks' ), $name ) ),
+					sprintf( '<img src="%1$s" alt="%2$s" />', get_template_directory_uri() . '/packages/buckram/assets/images/' . $license . '.svg', sprintf( __( 'Icon for the %s', 'pressbooks' ), $name ) ),
 					sprintf(
 						__( '%1$s by %2$s is licensed under a %3$s, except where otherwise noted.', 'pressbooks' ),
 						sprintf( '<a rel="cc:attributionURL" href="%1$s" property="dc:title">%2$s</a>', $link, $title ),
@@ -399,9 +409,27 @@ class Licensing {
 			} elseif ( $license === 'public-domain' ) {
 				return sprintf(
 					'<div class="license-attribution"><p>%1$s</p><p>%2$s</p></div>',
-					sprintf( '<img src="%1$s" alt="%2$s" />', get_template_directory_uri() . '/assets/book/images/' . $license . '.svg', sprintf( __( 'Icon for the %s license', 'pressbooks' ), $name ) ),
+					sprintf( '<img src="%1$s" alt="%2$s" />', get_template_directory_uri() . '/packages/buckram/assets/images/' . $license . '.svg', sprintf( __( 'Icon for the %s license', 'pressbooks' ), $name ) ),
 					sprintf(
-						__( 'To the extent possible under law, %1$s has waived all copyright and related or neighboring rights to %2$s, except where otherwise noted.', 'pressbooks' ),
+						__( 'This work (%1$s by %2$s) is free of known copyright restrictions.', 'pressbooks' ),
+						sprintf( '<a href="%1$s">%2$s</a>', $link, $title ),
+						$copyright_holder
+					)
+				);
+			} elseif ( $license === 'cc-zero' ) {
+				return sprintf(
+					'<div class="license-attribution"><p>%1$s</p><p>%2$s</p></div>',
+					sprintf( '<img src="%1$s" alt="%2$s" />', get_template_directory_uri() . '/packages/buckram/assets/images/' . $license . '.svg', sprintf( __( 'Icon for the %s license', 'pressbooks' ), $name ) ),
+					sprintf(
+						translate_nooped_plural(
+							_n_noop(
+								'To the extent possible under law, %1$s has waived all copyright and related or neighboring rights to %2$s, except where otherwise noted.',
+								'To the extent possible under law, %1$s have waived all copyright and related or neighboring rights to %2$s, except where otherwise noted.',
+								'pressbooks-book'
+							),
+							count( oxford_comma_explode( $copyright_holder ) ),
+							'pressbooks'
+						),
 						$copyright_holder,
 						sprintf( '<a href="%1$s">%2$s</a>', $link, $title )
 					)

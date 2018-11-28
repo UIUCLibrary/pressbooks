@@ -290,7 +290,7 @@ function create_tmp_file( $resource_key = '' ) {
  */
 function check_epubcheck_install() {
 	if ( ! defined( 'PB_EPUBCHECK_COMMAND' ) ) { // @see wp-config.php
-		define( 'PB_EPUBCHECK_COMMAND', '/usr/bin/epubcheck' );
+		define( 'PB_EPUBCHECK_COMMAND', '/usr/bin/java -jar /opt/epubcheck/epubcheck.jar' );
 	}
 
 	$output = [];
@@ -1074,6 +1074,24 @@ function str_lreplace( $search, $replace, $subject ) {
 }
 
 /**
+ * Search a comma delimited string for a match
+ *
+ * @param string $haystack
+ * @param string $needle
+ *
+ * @return bool
+ */
+function comma_delimited_string_search( $haystack, $needle ) {
+	$haystack = explode( ',', $haystack );
+	foreach ( $haystack as $hay ) {
+		if ( trim( $needle ) === trim( $hay ) ) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
  * @param string $content
  *
  * @return int
@@ -1441,3 +1459,50 @@ function main_contact_email() {
 	}
 	return $email ? $email : '';
 }
+
+/**
+ * Find a shortcode in content, look for an attribute in that shortcode, if value matches $from, change it to $to, return fixed content.
+ *
+ * @param string $content
+ * @param string $tag
+ * @param string $att
+ * @param string $from
+ * @param string $to
+ *
+ * @return string
+ */
+function shortcode_att_replace( $content, $tag, $att, $from, $to ) {
+	$fixed_content = $content;
+	$regex = get_shortcode_regex( [ $tag ] );
+	if ( preg_match_all( '/' . $regex . '/s', $content, $matches, PREG_SET_ORDER ) ) {
+		foreach ( $matches as $shortcode ) {
+			$shortcode_attrs = shortcode_parse_atts( $shortcode[3] );
+			if ( ! is_array( $shortcode_attrs ) ) {
+				$shortcode_attrs = [];
+			}
+			if ( isset( $shortcode_attrs[ $att ] ) ) {
+				if ( $shortcode_attrs[ $att ] === "&quot;{$from}&quot;" ) {
+					$preg_from = "&quot;{$from}&quot;";
+					$preg_to = "&quot;{$to}&quot;";
+				} elseif ( $shortcode_attrs[ $att ] === '"' . $from . '"' ) {
+					$preg_from = '"' . $from . '"';
+					$preg_to = '"' . $to . '"';
+				} elseif ( $shortcode_attrs[ $att ] === "'{$from}'" ) {
+					$preg_from = "'{$from}'";
+					$preg_to = "'{$to}'";
+				} elseif ( (string) $shortcode_attrs[ $att ] === (string) $from ) {
+					$preg_from = $from;
+					$preg_to = $to;
+				} else {
+					continue;
+				}
+				$preg_from = '/(' . preg_quote( $att, '/' ) . '\s*=.*?)' . preg_quote( $preg_from, '/' ) . '/';
+				$preg_to = '${1}' . $preg_to;
+				$fixed_shortcode = preg_replace( $preg_from, $preg_to, $shortcode[0] );
+				$fixed_content = str_replace( $shortcode[0], $fixed_shortcode, $fixed_content );
+			}
+		}
+	}
+	return $fixed_content;
+}
+

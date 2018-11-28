@@ -10,9 +10,13 @@
 
 namespace Pressbooks;
 
-use Masterminds\HTML5;
+use Pressbooks\Modules\Export\Export;
+use Pressbooks\Modules\Export\Xhtml\Xhtml11;
 
 class Book {
+
+	const SUBSECTIONS_TRANSIENT = 'pb_book_subsections';
+	const SUBSECTION_PROCESSING_TRANSIENT = 'pb_getting_all_subsections';
 
 	/**
 	 * @var Book
@@ -483,12 +487,21 @@ class Book {
 
 		global $blog_id;
 
+		// Book Object
 		wp_cache_delete( "book-inf-$blog_id", 'pb' ); // Delete the cached value for getBookInfo()
 		wp_cache_delete( "book-str-$blog_id", 'pb' ); // Delete the cached value for getBookStructure()
 		wp_cache_delete( "book-cnt-$blog_id", 'pb' ); // Delete the cached value for getBookContents()
-		( new Catalog() )->deleteCacheByBookId( $blog_id );
 		static::$preview = [];
 		static::$__order = [];
+
+		// Subsections
+		delete_transient( static::SUBSECTIONS_TRANSIENT );
+
+		// User Catalog
+		( new Catalog() )->deleteCacheByBookId( $blog_id );
+
+		// Output buffers
+		delete_transient( Xhtml11::TRANSIENT );
 
 		/**
 		 * @since 5.0.0
@@ -507,28 +520,27 @@ class Book {
 	 * @return array|false
 	 */
 	static function getSubsections( $id ) {
-
 		$parent = get_post( $id );
 		if ( empty( $parent ) ) {
 			return false;
 		}
-		$type = $parent->post_type;
-		$output = [];
-		$s = 1;
-
-		$content = wptexturize( $parent->post_content );
-		$content = wpautop( $content );
-		$content = mb_convert_encoding( $content, 'HTML-ENTITIES', 'UTF-8' );
-
-		if ( stripos( $content, '<h1' ) === false ) {
+		$has_shortcode = has_shortcode( $parent->post_content, 'heading' );
+		if ( stripos( $parent->post_content, '<h1' ) === false && $has_shortcode === false ) { // No <h1> or [heading] shortcode
 			return false;
 		}
 
-		$doc = new HTML5();
-		$dom = $doc->loadHTML( strip_tags( $content, '<h1>' ) ); // Strip everything except h1 to speed up load time
+		$type = $parent->post_type;
+		$content = ( $has_shortcode ) ? apply_filters( 'the_content', $parent->post_content ) : $parent->post_content; // Only render shortcodes if we have to
+		$content = strip_tags( $content, '<h1>' );  // Strip everything except h1 to speed up load time
+		$output = [];
+		$s = 1;
+
+		$doc = new HtmlParser( true ); // Because we are not saving, use internal parser to speed up load time
+		$dom = $doc->loadHTML( $content );
 		$sections = $dom->getElementsByTagName( 'h1' );
 		foreach ( $sections as $section ) {
-			$output[ $type . '-' . $id . '-section-' . $s ] = $section->textContent;
+			/** @var $section \DOMElement */
+			$output[ $type . '-' . $id . '-section-' . $s ] = wptexturize( $section->textContent );
 			$s++;
 		}
 
@@ -540,6 +552,52 @@ class Book {
 	}
 
 	/**
+	 * Returns an array of front matter, chapters, and back matter which contain subsections.
+	 *
+	 * @param array $book_structure The book structure from getBookStructure()
+	 * @return array The subsections, grouped by parent post type
+	 */
+	static function getAllSubsections( $book_structure ) {
+		if ( Export::shouldParseSubsections() ) {
+			$book_subsections_transient = \Pressbooks\Book::SUBSECTIONS_TRANSIENT;
+			$subsection_processing_transient = \Pressbooks\Book::SUBSECTION_PROCESSING_TRANSIENT;
+			$book_subsections = get_transient( $book_subsections_transient );
+			if ( ! $book_subsections ) {
+				$book_subsections = [];
+				if ( ! get_transient( $subsection_processing_transient ) ) {
+					set_transient( $subsection_processing_transient, 1, 5 * MINUTE_IN_SECONDS );
+					foreach ( $book_structure['front-matter'] as $section ) {
+						$subsections = \Pressbooks\Book::getSubsections( $section['ID'] );
+						if ( $subsections ) {
+							$book_subsections['front-matter'][ $section['ID'] ] = $subsections;
+						}
+					}
+					foreach ( $book_structure['part'] as $key => $part ) {
+						if ( ! empty( $part['chapters'] ) ) {
+							foreach ( $part['chapters'] as $section ) {
+								$subsections = \Pressbooks\Book::getSubsections( $section['ID'] );
+								if ( $subsections ) {
+									$book_subsections['chapters'][ $section['ID'] ] = $subsections;
+								}
+							}
+						}
+					}
+					foreach ( $book_structure['back-matter'] as $section ) {
+						$subsections = \Pressbooks\Book::getSubsections( $section['ID'] );
+						if ( $subsections ) {
+							$book_subsections['back-matter'][ $section['ID'] ] = $subsections;
+						}
+					}
+					delete_transient( $subsection_processing_transient );
+				}
+			}
+			set_transient( $book_subsections_transient, $book_subsections );
+			return $book_subsections;
+		}
+		return [];
+	}
+
+	/**
 	 * Returns chapter, front or back matter content with section ID and classes added.
 	 *
 	 * @param string $content
@@ -548,44 +606,31 @@ class Book {
 	 * @return string|false
 	 */
 	static function tagSubsections( $content, $id ) {
-
-		$s = 1;
 		$parent = get_post( $id );
 		if ( empty( $parent ) ) {
 			return false;
 		}
-		$type = $parent->post_type;
-
-		// Fix unusual HTML that tends to break our DOM transform (issues/228)
-		$content = mb_convert_encoding( $content, 'HTML-ENTITIES', 'UTF-8' );
-		$content = str_ireplace( [ '<b></b>', '<i></i>', '<strong></strong>', '<em></em>' ], '', $content );
-
 		if ( stripos( $content, '<h1' ) === false ) {
 			return false;
 		}
 
-		$doc = new HTML5(
-			[
-				'disable_html_ns' => true,
-			]
-		); // Disable default namespace for \DOMXPath compatibility
+		$type = $parent->post_type;
+		$s = 1;
+
+		$doc = new HtmlParser();
 		$dom = $doc->loadHTML( $content );
 		$sections = $dom->getElementsByTagName( 'h1' );
 		foreach ( $sections as $section ) {
 			/** @var $section \DOMElement */
-			$section->setAttribute( 'id', $type . '-' . $id . '-section-' . $s++ );
-			$section->setAttribute( 'class', 'section-header' );
+			$old_id = $section->getAttribute( 'id' );
+			$old_class = $section->getAttribute( 'class' );
+			$new_id = "{$type}-{$id}-section-" . $s++;
+			$new_class = trim( "section-header {$old_class} {$old_id}" );
+			$section->setAttribute( 'id', $new_id );
+			$section->setAttribute( 'class', $new_class );
 		}
-		$xpath = new \DOMXPath( $dom );
-		while ( ( $nodes = $xpath->query( '//*[not(text() or node() or self::br or self::hr or self::img)]' ) ) && $nodes->length > 0 ) { // @codingStandardsIgnoreLine
-			foreach ( $nodes as $node ) {
-				/** @var $node \DOMElement */
-				$node->appendChild( new \DOMText( '' ) );
-			}
-		}
-		$html = $dom->saveXML( $dom->documentElement );
 
-		return \Pressbooks\Sanitize\strip_container_tags( $html );
+		return $doc->saveHTML( $dom );
 	}
 
 	/**

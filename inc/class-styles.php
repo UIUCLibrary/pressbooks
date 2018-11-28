@@ -9,7 +9,6 @@ namespace Pressbooks;
 use function \Pressbooks\Editor\update_editor_style;
 use function \Pressbooks\Sanitize\normalize_css_urls;
 use function \Pressbooks\Utility\debug_error_log;
-use Pressbooks\CustomCss;
 use Pressbooks\Modules\ThemeOptions\ThemeOptions;
 
 /**
@@ -43,6 +42,13 @@ class Styles {
 	 */
 	public function __construct( $sass ) {
 		$this->sass = $sass;
+	}
+
+	/**
+	 * @return array
+	 */
+	public function getSupported() {
+		return $this->supported;
 	}
 
 	/**
@@ -453,7 +459,7 @@ class Styles {
 					$this->sass->pathToUserGeneratedSass(),
 					$this->sass->pathToPartials(),
 					$this->sass->pathToFonts(),
-					get_stylesheet_directory(),
+					$this->getDir(),
 				]
 			);
 		} elseif ( $this->isCurrentThemeCompatible( 2 ) ) {
@@ -532,9 +538,6 @@ class Styles {
 	 */
 	public function updateWebBookStyleSheet( $stylesheet = null ) {
 
-		$styles = Container::get( 'Styles' );
-		$sass = Container::get( 'Sass' );
-
 		if ( CustomCss::isCustomCss() ) {
 			// Compile pressbooks-book web stylesheet when using the *DEPRECATED* Custom CSS theme
 			$theme = wp_get_theme( 'pressbooks-book' );
@@ -567,32 +570,43 @@ class Styles {
 	}
 
 	/**
-	 * If the current theme's version has increased, do SCSS stuff
+	 * If the current theme's version or Buckram's version has increased, do SCSS stuff
 	 *
 	 * @return bool
 	 */
 	public function maybeUpdateStylesheets() {
-		// Theme was updated?
+		// If this is ajax/cron, don't update right now
+		if ( wp_doing_ajax() || wp_doing_cron() ) {
+			return false;
+		}
+
+		// Compare current and previous Buckram versions
+		$current_buckram_version = $this->getBuckramVersion();
+		$last_buckram_version = get_option( 'pressbooks_buckram_version' );
+		$buckram_updated = version_compare( $current_buckram_version, $last_buckram_version ) > 0;
+
+		// Compare current and previous theme versions
 		$theme = wp_get_theme();
 		$current_theme_version = $theme->get( 'Version' );
 		$last_theme_version = get_option( 'pressbooks_theme_version' );
-		if ( version_compare( $current_theme_version, $last_theme_version ) > 0 ) {
-			( new ThemeOptions() )->clearCache();
-			$this->updateWebBookStyleSheet();
-			update_editor_style();
-			update_option( 'pressbooks_theme_version', $current_theme_version );
-			return true;
-		}
+		$theme_updated = version_compare( $current_theme_version, $last_theme_version ) > 0;
 
-		// Buckram was updated?
-		$current_buckram_version = $this->getBuckramVersion();
-		$last_buckram_version = get_option( 'pressbooks_buckram_version' );
-		if ( version_compare( $current_buckram_version, $last_buckram_version ) > 0 ) {
-			( new ThemeOptions() )->clearCache();
-			$this->updateWebBookStyleSheet();
-			update_editor_style();
-			update_option( 'pressbooks_buckram_version', $current_buckram_version );
-			return true;
+		// If either Buckram or the theme were updated, rebuild the web and editor stylesheets.
+		if ( $buckram_updated || $theme_updated ) {
+			if ( ! get_transient( 'pressbooks_updating_stylesheet' ) ) {
+				set_transient( 'pressbooks_updating_stylesheet', 1, 5 * MINUTE_IN_SECONDS );
+				( new ThemeOptions() )->clearCache();
+				$this->updateWebBookStyleSheet();
+				update_editor_style();
+				if ( $buckram_updated ) {
+					update_option( 'pressbooks_buckram_version', $current_buckram_version );
+				}
+				if ( $theme_updated ) {
+					update_option( 'pressbooks_theme_version', $current_theme_version );
+				}
+				delete_transient( 'pressbooks_updating_stylesheet' );
+				return true;
+			}
 		}
 
 		return false;
