@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "580dced21ec18da294aad48969d8e23e",
+    "content-hash": "6e92706ef2a1d379e7c0c88fca9cbf50",
     "packages": [
         {
             "name": "aws/aws-crt-php",
@@ -2005,26 +2005,24 @@
         },
         {
             "name": "pressbooks/pb-cli",
-            "version": "2.1.0",
+            "version": "3.0.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/pressbooks/pb-cli.git",
-                "reference": "cc81de0ee946afad8abe291f4b59abb5237bf6ee"
+                "reference": "1e0e271f7d50aeaa155f640e575247e104a36640"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/pressbooks/pb-cli/zipball/cc81de0ee946afad8abe291f4b59abb5237bf6ee",
-                "reference": "cc81de0ee946afad8abe291f4b59abb5237bf6ee",
+                "url": "https://api.github.com/repos/pressbooks/pb-cli/zipball/1e0e271f7d50aeaa155f640e575247e104a36640",
+                "reference": "1e0e271f7d50aeaa155f640e575247e104a36640",
                 "shasum": ""
             },
             "require": {
-                "jenssegers/blade": "1.1.0",
-                "php": ">=7.3"
+                "php": ">=7.4"
             },
             "require-dev": {
                 "wp-cli/entity-command": "^2.1",
                 "wp-cli/extension-command": "^2.1",
-                "wp-cli/i18n-command": "^2.2",
                 "wp-cli/scaffold-command": "^2.0",
                 "wp-cli/wp-cli": "^2.5",
                 "wp-cli/wp-cli-tests": "^3.0"
@@ -2036,8 +2034,7 @@
                     "pb issue-template",
                     "pb theme lock",
                     "pb theme unlock",
-                    "pb clone",
-                    "pb make-pot"
+                    "pb clone"
                 ]
             },
             "autoload": {
@@ -2056,9 +2053,9 @@
             "homepage": "https://github.com/pressbooks/pb-cli/",
             "support": {
                 "issues": "https://github.com/pressbooks/pb-cli/issues",
-                "source": "https://github.com/pressbooks/pb-cli/tree/2.1.0"
+                "source": "https://github.com/pressbooks/pb-cli/tree/3.0.0"
             },
-            "time": "2021-05-25T20:27:27+00:00"
+            "time": "2022-09-07T21:28:38+00:00"
         },
         {
             "name": "psr/http-client",
