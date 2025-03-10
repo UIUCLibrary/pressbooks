@@ -44,7 +44,7 @@
 		"illuminate/view": "^8.0",
 		"illuminate/database": "^8.0",
 		"illuminate/pagination": "^8.0",
-		"jenssegers/imagehash": "^0.9.0",
+		"jenssegers/imagehash": "^0.10.0",
 		"johnbillion/extended-cpts": "^5.0",
 		"laravel/helpers": "^1.5",
 		"masterminds/html5": "^2.6",
