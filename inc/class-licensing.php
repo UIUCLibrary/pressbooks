@@ -249,7 +249,7 @@ class Licensing {
 			$link = get_permalink( $post_id );
 		}
 
-		// Copyright holder, set in order of precedence
+		// Determine copyright holder, set in order of precedence
 		if ( ! empty( $section_author ) && ! empty( $section_license ) ) {
 			// section author higher priority than book author when there's a custom license
 			$copyright_holder = $section_author;
@@ -271,6 +271,7 @@ class Licensing {
 			$copyright_holder = '';
 		}
 
+		//set copyright year
 		if ( ! empty( $metadata['pb_copyright_year'] ) ) {
 			$copyright_year = $metadata['pb_copyright_year'];
 		} elseif ( ! empty( $metadata['pb_publication_date'] ) ) {
@@ -279,17 +280,18 @@ class Licensing {
 			$copyright_year = 0;
 		}
 
+		//generate html blob from metadata
 		if ( ! $this->isSupportedType( $license ) ) {
 			// License not supported, bail but allow a custom fallback printer
-			return apply_filters( 'print_custom_license', '', array_merge( $metadata, [
+			$html =  apply_filters( 'print_custom_license', '', array_merge( $metadata, [
 				'link' => $link,
 				'title' => $title,
 				'copyright_holder' => $copyright_holder,
 				'license' => $license,
 			] ) );
+		} else {
+			$html = $this->getLicense( $license, $copyright_holder, $link, $title, $copyright_year );
 		}
-
-		$html = $this->getLicense( $license, $copyright_holder, $link, $title, $copyright_year );
 
 		return $html;
 	}
