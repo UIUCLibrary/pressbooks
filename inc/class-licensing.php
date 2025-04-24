@@ -12,8 +12,8 @@ use function \Pressbooks\Utility\implode_add_and;
 
 /**
  * TODO: Refactor
- * Custom Licenses don't work with the Creative Commons API. For now we fallback to 'all-rights-reserved'. Instead, the Creative Commons API should be gutted.
- * An admin can delete Creative Commons taxonomies. Should we let them?
+ * Custom Licenses don't work with the Creative Commons API. For now we fallback to 'all-rights-reserved'. Instead, the
+ * Creative Commons API should be gutted. An admin can delete Creative Commons taxonomies. Should we let them?
  */
 class Licensing {
 
@@ -204,7 +204,7 @@ class Licensing {
 
 	/**
 	 * Will create an html blob of copyright information, returns empty string
-	 * if license not supported
+	 * if license not supported.
 	 *
 	 * @param array $metadata \Pressbooks\Book::getBookInformation
 	 * @param int $post_id (optional)
@@ -414,7 +414,20 @@ class Licensing {
 	 * @return string $html License blob.
 	 */
 	public function getLicense( $license, $copyright_holder, $link, $title, $copyright_year ) {
-		if ( ! $this->isSupportedType( $license ) ) {
+		if ( empty( $metadata['pb_book_license'] ) ) {
+			$all_rights_reserved = true;
+		} elseif ( $metadata['pb_book_license'] === 'all-rights-reserved' ) {
+			$all_rights_reserved = true;
+		} else {
+			$all_rights_reserved = false;
+		}
+		if ( ! empty( $metadata['pb_custom_copyright'] ) ) {
+			$has_custom_copyright = true;
+		} else {
+			$has_custom_copyright = false;
+		}
+		//if there is not a supported license and
+		if ( ! $this->isSupportedType( $license ) && ( ! $has_custom_copyright && $all_rights_reserved)) {
 			return sprintf(
 				'<div class="license-attribution"><p>%s</p></div>',
 				sprintf(
