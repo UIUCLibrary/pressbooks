@@ -212,12 +212,13 @@ class Licensing {
 	 *
 	 * @return string
 	 */
-	public function doLicense( $metadata, $post_id = 0, $title = '' ) {
+	public function doLicense(array $metadata, int $post_id = 0, string $title = '' ): string
+	{
 		if ( ! empty( $title ) ) {
 			_doing_it_wrong( __METHOD__, __( '$title is deprecated. Method will automatically determine title from licenses', 'pressbooks' ), 'Pressbooks 5.7.0' );
 		}
 
-		$book_license = isset( $metadata['pb_book_license'] ) ? $metadata['pb_book_license'] : '';
+		$book_license = $metadata['pb_book_license'] ?? '';
 		if ( empty( $post_id ) ) {
 			// if no post $id given, set empty strings
 			$section_license = '';
