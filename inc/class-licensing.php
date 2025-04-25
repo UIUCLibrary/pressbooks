@@ -218,6 +218,19 @@ class Licensing {
 			_doing_it_wrong( __METHOD__, __( '$title is deprecated. Method will automatically determine title from licenses', 'pressbooks' ), 'Pressbooks 5.7.0' );
 		}
 
+		if ( empty( $metadata['pb_book_license'] ) ) {
+			$all_rights_reserved = true;
+		} elseif ( $metadata['pb_book_license'] === 'all-rights-reserved' ) {
+			$all_rights_reserved = true;
+		} else {
+			$all_rights_reserved = false;
+		}
+		if ( ! empty( $metadata['pb_custom_copyright'] ) ) {
+			$has_custom_copyright = true;
+		} else {
+			$has_custom_copyright = false;
+		}
+
 		$book_license = $metadata['pb_book_license'] ?? '';
 		if ( empty( $post_id ) ) {
 			// if no post $id given, set empty strings
@@ -232,6 +245,8 @@ class Licensing {
 		if ( ! empty( $section_license ) ) {
 			// section copyright higher priority than book
 			$license = $section_license;
+		} elseif ( ! empty( $has_custom_copyright ) ) {
+			echo $metadata['pb_custom_copyright'];
 		} elseif ( ! empty( $book_license ) ) {
 			// book is the fallback, default
 			$license = $book_license;
@@ -429,6 +444,7 @@ class Licensing {
 		} else {
 			$has_custom_copyright = false;
 		}
+		$html_license = '';
 		//if there is not a supported license and
 		if ( ! $this->isSupportedType( $license ) && ( ! $has_custom_copyright && $all_rights_reserved)) {
 			return sprintf(
@@ -456,7 +472,7 @@ class Licensing {
 					)
 				);
 			} elseif ( $license === 'all-rights-reserved' ) {
-				return sprintf(
+				$html_license = sprintf(
 					'<div class="license-attribution"><p>%s</p></div>',
 					sprintf(
 						__( '%1$s Copyright &copy;%2$s by %3$s. All Rights Reserved.', 'pressbooks' ),
@@ -466,7 +482,7 @@ class Licensing {
 					)
 				);
 			} elseif ( $license === 'public-domain' ) {
-				return sprintf(
+				$html_license = sprintf(
 					'<div class="license-attribution"><p>%1$s</p><p>%2$s</p></div>',
 					sprintf( '<img src="%1$s" alt="%2$s" />', get_template_directory_uri() . '/packages/buckram/assets/images/' . $license . '.svg', sprintf( __( 'Icon for the %s license', 'pressbooks' ), $name ) ),
 					sprintf(
@@ -476,7 +492,7 @@ class Licensing {
 					)
 				);
 			} elseif ( $license === 'cc-zero' ) {
-				return sprintf(
+				$html_license = sprintf(
 					'<div class="license-attribution"><p>%1$s</p><p>%2$s</p></div>',
 					sprintf( '<img src="%1$s" alt="%2$s" />', get_template_directory_uri() . '/packages/buckram/assets/images/' . $license . '.svg', sprintf( __( 'Icon for the %s license', 'pressbooks' ), $name ) ),
 					sprintf(
@@ -494,7 +510,7 @@ class Licensing {
 					)
 				);
 			} else {
-				return sprintf(
+				$html_license = sprintf(
 					__( '%1$s Copyright &copy;%2$s by %3$s is licensed under a %4$s, except where otherwise noted.', 'pressbooks' ),
 					sprintf( '<a href="%1$s" property="dc:title">%2$s</a>', $link, $title ),
 					( $copyright_year ) ? ' ' . $copyright_year : '',
@@ -503,6 +519,10 @@ class Licensing {
 				);
 			}
 		}
+		if ($has_custom_copyright) {
+			$html_license .= $metadata['pb_custom_copyright'];
+		}
+		return $html_license;
 	}
 
 	/**
