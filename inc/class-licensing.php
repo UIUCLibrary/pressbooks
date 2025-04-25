@@ -246,8 +246,6 @@ class Licensing {
 		if ( ! empty( $section_license ) ) {
 			// section copyright higher priority than book
 			$license = $section_license;
-		} elseif ( ! empty( $has_custom_copyright ) ) {
-			echo $metadata['pb_custom_copyright'];
 		} elseif ( ! empty( $book_license ) ) {
 			// book is the fallback, default
 			$license = $book_license;
