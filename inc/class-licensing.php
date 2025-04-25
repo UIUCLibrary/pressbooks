@@ -212,7 +212,7 @@ class Licensing {
 	 *
 	 * @return string
 	 */
-	public function doLicense(array $metadata, int $post_id = 0, string $title = '' ): string
+	public function doLicense(array $metadata, int $post_id = 0, string $title = '', $show_custom_copyright = true ): string
 	{
 		if ( ! empty( $title ) ) {
 			_doing_it_wrong( __METHOD__, __( '$title is deprecated. Method will automatically determine title from licenses', 'pressbooks' ), 'Pressbooks 5.7.0' );
@@ -305,6 +305,9 @@ class Licensing {
 			] ) );
 		} else {
 			$html = $this->getLicense( $license, $copyright_holder, $link, $title, $copyright_year );
+		}
+		if ( $has_custom_copyright && $show_custom_copyright && empty( $section_license )) {
+			$html .= '<div class="license-attribution">' . $metadata['pb_custom_copyright'] . '</div>';
 		}
 
 		return $html;
