@@ -231,6 +231,7 @@ class Licensing {
 			$has_custom_copyright = false;
 		}
 
+		$license = '';
 		$book_license = $metadata['pb_book_license'] ?? '';
 		if ( empty( $post_id ) ) {
 			// if no post $id given, set empty strings
