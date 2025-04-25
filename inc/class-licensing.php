@@ -218,13 +218,6 @@ class Licensing {
 			_doing_it_wrong( __METHOD__, __( '$title is deprecated. Method will automatically determine title from licenses', 'pressbooks' ), 'Pressbooks 5.7.0' );
 		}
 
-		if ( empty( $metadata['pb_book_license'] ) ) {
-			$all_rights_reserved = true;
-		} elseif ( $metadata['pb_book_license'] === 'all-rights-reserved' ) {
-			$all_rights_reserved = true;
-		} else {
-			$all_rights_reserved = false;
-		}
 		if ( ! empty( $metadata['pb_custom_copyright'] ) ) {
 			$has_custom_copyright = true;
 		} else {
@@ -249,6 +242,8 @@ class Licensing {
 		} elseif ( ! empty( $book_license ) ) {
 			// book is the fallback, default
 			$license = $book_license;
+		} elseif ($has_custom_copyright ) {
+			$license = $metadata['pb_custom_copyright'];
 		} else {
 			$license = 'all-rights-reserved';
 		}
