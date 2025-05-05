@@ -23,6 +23,10 @@ class TaxonomyReorderableMultiselect extends Field {
 	public function getValue() {
 		global $post;
 
+		if ( ! $post ) {
+			return null;
+		}
+
 		$value = get_post_meta( $post->ID, $this->name, false );
 
 		return is_array( $value ) ? implode( ',', array_filter( $value ) ) : $value;
@@ -34,7 +38,7 @@ class TaxonomyReorderableMultiselect extends Field {
 		$options = [];
 
 		foreach ( $terms as $term ) {
-			$options[ $term->slug ] = $term->name;
+			$options[ urldecode( $term->slug ) ] = $term->name;
 		}
 
 		return $options;

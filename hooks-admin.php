@@ -308,6 +308,7 @@ add_action( 'init', [ '\Pressbooks\Covergenerator\Covergenerator', 'init' ] );
 
 if ( $is_book ) {
 	add_action( 'admin_post_pb_regenerate_webbook_stylesheet', '\Pressbooks\Admin\Diagnostics\handle_stylesheet_regeneration' );
+	add_action( 'admin_post_pdf_preview', 'Pressbooks\Admin\Diagnostics\handle_pdf_preview' );
 
 	add_action(
 		'post_edit_form_tag', function () {
@@ -377,6 +378,7 @@ add_filter( 'user_contactmethods', '\Pressbooks\Admin\Laf\modify_user_contact_fi
 add_action( 'user_profile_update_errors', '\Pressbooks\Admin\Laf\sanitize_user_profile', 10, 3 );
 add_action( 'show_user_profile', '\Pressbooks\Admin\Laf\add_user_profile_fields', 11 );
 add_action( 'edit_user_profile', '\Pressbooks\Admin\Laf\add_user_profile_fields', 11 );
+add_action( 'admin_enqueue_scripts', '\Pressbooks\Admin\Laf\enqueue_user_profile_scripts' );
 add_action( 'edit_user_profile_update', '\Pressbooks\Admin\Laf\update_user_profile_fields', 11 );
 add_action( 'personal_options_update', '\Pressbooks\Admin\Laf\update_user_profile_fields', 11 );
 

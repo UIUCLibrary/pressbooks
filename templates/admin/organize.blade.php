@@ -16,24 +16,29 @@
                         <span>{{ __('Private', 'pressbooks') }}</span>
                     </h4>
                 @endif
-                <div class="publicize-form">
-                    <label for="blog-public"><input type="radio" {{ checked($book_is_public, 1, false) }}
-                            value="1" name="blog_public" id="blog-public"><span
-                            class="public">{{ __('Public', 'pressbooks') }}</span> &mdash;
-                        {!! sprintf(
-                            __(
-                                'Anyone with the link can see your book. Public books are eligible to be listed in <a href="%s">Pressbooks Directory</a>. Individual chapters can be set to private.',
-                                'pressbooks',
-                            ),
-                            esc_url('https://pressbooks.directory'),
-                        ) !!}
-                    </label>
-                    <label for="blog-private"><input type="radio" {{ checked($book_is_public, 0, false) }}
-                            value="0" name="blog_public" id="blog-private"><span
-                            class="private">{{ __('Private', 'pressbooks') }}</span> &mdash;
-                        {{ __('Only users you invite can see your book, regardless of individual chapter visibility below.', 'pressbooks') }}
-                    </label>
-                </div>
+                <fieldset class="publicize-form">
+                    <legend class="screen-reader-text">{{ __( 'Global Privacy', 'pressbooks' ) }}</legend>
+                    <div>
+						<input type="radio" {{ checked($book_is_public, 1, false) }} value="1" name="blog_public" id="blog-public">
+						<label for="blog-public"><span
+								class="public">{{ __('Public', 'pressbooks') }}</span> &mdash;
+							{!! sprintf(
+								__(
+									'Anyone with the link can see your book. Public books are eligible to be listed in <a href="%s">Pressbooks Directory</a>. Individual chapters can be set to private.',
+									'pressbooks',
+								),
+								esc_url('https://pressbooks.directory'),
+							) !!}
+						</label>
+					</div>
+                    <div>
+						<input type="radio" {{ checked($book_is_public, 0, false) }} value="0" name="blog_public" id="blog-private">
+						<label for="blog-private"><span
+								class="private">{{ __('Private', 'pressbooks') }}</span> &mdash;
+							{{ __('Only users you invite can see your book, regardless of individual chapter visibility below.', 'pressbooks') }}
+						</label>
+					</div>
+                </fieldset>
             </div>
         </div>
     @endif
@@ -77,15 +82,24 @@
             @if ($can_edit_posts)
                 <div class="page-title-actions">
                     @if (str_contains($slug, 'part'))
-						<a class="page-title-action" href="{!! admin_url("post-new.php?post_type={$group['abbreviation']}&startparent={$group['id']}") !!}">
-							{{ __('Add', 'pressbooks') }} {{ $group['name'] }}
+						<a
+							class="page-title-action"
+							href="{!! admin_url("post-new.php?post_type={$group['abbreviation']}&startparent={$group['id']}") !!}"
+							aria-label="{{ sprintf( __( 'Add %s to %s', 'pressbooks' ), $group['name'], $group['title'] ) }}"
+						>
+							{{ sprintf( __( 'Add %s', 'pressbooks' ), $group['name'] ) }}
 						</a>
-                        <a class="page-title-action" href="{!! admin_url('post-new.php?post_type=part') !!}">
+                        <a
+							class="page-title-action" href="{!! admin_url('post-new.php?post_type=part') !!}"
+							aria-label="{{ sprintf( __( 'Add a new part below to %s part', 'pressbooks' ), $group['title'] ) }}"
+						>
 							{{ __('Add Part', 'pressbooks') }}
 						</a>
 					@else
-						<a class="page-title-action" href="{!! admin_url('post-new.php?post_type=' . $slug) !!}">
-							{{ __('Add', 'pressbooks') }} {{ $group['name'] }}
+						<a
+							class="page-title-action" href="{!! admin_url('post-new.php?post_type=' . $slug) !!}"
+							aria-label="{{ sprintf( __( 'Add a new %s', 'pressbooks' ), $group['name'] ) }}">
+							{{ sprintf( __( 'Add %s', 'pressbooks' ), $group['name'] ) }}
 						</a>
                     @endif
                 </div>
@@ -133,7 +147,7 @@
                 <tbody id="the-list-{{ $slug }}">
                     @foreach ($group['items'] as $content)
                         <tr id="{{ $slug }}_{{ $content['ID'] }}">
-                            <td class="title column-title has-row-actions">
+                            <th class="title column-title has-row-actions">
                                 <div class="row-title">
                                     @if (current_user_can('edit_post', $content['ID']))
                                         <a href="{!! admin_url('post.php?post=' . $content['ID'] . '&action=edit') !!}">
@@ -192,7 +206,7 @@
                                         @endif
                                     </div>
                                 </div>
-                            </td>
+                            </th>
                             <td class="author column-author">
                                 <span class="author-label">{{ __('Authors', 'pressbooks') }}:</span>
                                 {!! $contributors->get($content['ID'], 'pb_authors') ?: '—' !!}

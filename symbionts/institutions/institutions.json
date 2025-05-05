@@ -3215,6 +3215,11 @@
             "code": "EU-ESP-003",
             "name": "Universidad Politécnica de Madrid",
             "url": "https:\/\/www.upm.es\/"
+          },
+          {
+            "code": "EU-ESP-004",
+            "name": "University of Huelva",
+            "url": "https:\/\/www.uhu.es\/"
           }
         ]
       }
@@ -13832,7 +13837,7 @@
           },
           {
             "code": "US-TX-080",
-            "name": "Texas A & M University-Commerce",
+            "name": "East Texas A&M University",
             "url": "https:\/\/www.tamuc.edu\/"
           },
           {
