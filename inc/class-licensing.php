@@ -12,8 +12,8 @@ use function \Pressbooks\Utility\implode_add_and;
 
 /**
  * TODO: Refactor
- * Custom Licenses don't work with the Creative Commons API. For now we fallback to 'all-rights-reserved'. Instead, the Creative Commons API should be gutted.
- * An admin can delete Creative Commons taxonomies. Should we let them?
+ * Custom Licenses don't work with the Creative Commons API. For now we fallback to 'all-rights-reserved'. Instead, the
+ * Creative Commons API should be gutted. An admin can delete Creative Commons taxonomies. Should we let them?
  */
 class Licensing {
 
@@ -204,7 +204,7 @@ class Licensing {
 
 	/**
 	 * Will create an html blob of copyright information, returns empty string
-	 * if license not supported
+	 * if license not supported.
 	 *
 	 * @param array $metadata \Pressbooks\Book::getBookInformation
 	 * @param int $post_id (optional)
@@ -212,12 +212,20 @@ class Licensing {
 	 *
 	 * @return string
 	 */
-	public function doLicense( $metadata, $post_id = 0, $title = '' ) {
+	public function doLicense(array $metadata, int $post_id = 0, string $title = '', $show_custom_copyright = true ): string
+	{
 		if ( ! empty( $title ) ) {
 			_doing_it_wrong( __METHOD__, __( '$title is deprecated. Method will automatically determine title from licenses', 'pressbooks' ), 'Pressbooks 5.7.0' );
 		}
 
-		$book_license = isset( $metadata['pb_book_license'] ) ? $metadata['pb_book_license'] : '';
+		if ( ! empty( $metadata['pb_custom_copyright'] ) ) {
+			$has_custom_copyright = true;
+		} else {
+			$has_custom_copyright = false;
+		}
+
+		$license = '';
+		$book_license = $metadata['pb_book_license'] ?? '';
 		if ( empty( $post_id ) ) {
 			// if no post $id given, set empty strings
 			$section_license = '';
@@ -234,6 +242,8 @@ class Licensing {
 		} elseif ( ! empty( $book_license ) ) {
 			// book is the fallback, default
 			$license = $book_license;
+		} elseif ($has_custom_copyright ) {
+			$license = $metadata['pb_custom_copyright'];
 		} else {
 			$license = 'all-rights-reserved';
 		}
@@ -248,7 +258,7 @@ class Licensing {
 			$link = get_permalink( $post_id );
 		}
 
-		// Copyright holder, set in order of precedence
+		// Determine copyright holder, set in order of precedence
 		if ( ! empty( $section_author ) && ! empty( $section_license ) ) {
 			// section author higher priority than book author when there's a custom license
 			$copyright_holder = $section_author;
@@ -270,6 +280,7 @@ class Licensing {
 			$copyright_holder = '';
 		}
 
+		//set copyright year
 		if ( ! empty( $metadata['pb_copyright_year'] ) ) {
 			$copyright_year = $metadata['pb_copyright_year'];
 		} elseif ( ! empty( $metadata['pb_publication_date'] ) ) {
@@ -278,17 +289,21 @@ class Licensing {
 			$copyright_year = 0;
 		}
 
+		//generate html blob from metadata
 		if ( ! $this->isSupportedType( $license ) ) {
 			// License not supported, bail but allow a custom fallback printer
-			return apply_filters( 'print_custom_license', '', array_merge( $metadata, [
+			$html =  apply_filters( 'print_custom_license', '', array_merge( $metadata, [
 				'link' => $link,
 				'title' => $title,
 				'copyright_holder' => $copyright_holder,
 				'license' => $license,
 			] ) );
+		} else {
+			$html = $this->getLicense( $license, $copyright_holder, $link, $title, $copyright_year );
 		}
-
-		$html = $this->getLicense( $license, $copyright_holder, $link, $title, $copyright_year );
+		if ( $has_custom_copyright && $show_custom_copyright && empty( $section_license )) {
+			$html .= '<div class="license-attribution">' . $metadata['pb_custom_copyright'] . '</div>';
+		}
 
 		return $html;
 	}
@@ -414,7 +429,21 @@ class Licensing {
 	 * @return string $html License blob.
 	 */
 	public function getLicense( $license, $copyright_holder, $link, $title, $copyright_year ) {
-		if ( ! $this->isSupportedType( $license ) ) {
+		if ( empty( $metadata['pb_book_license'] ) ) {
+			$all_rights_reserved = true;
+		} elseif ( $metadata['pb_book_license'] === 'all-rights-reserved' ) {
+			$all_rights_reserved = true;
+		} else {
+			$all_rights_reserved = false;
+		}
+		if ( ! empty( $metadata['pb_custom_copyright'] ) ) {
+			$has_custom_copyright = true;
+		} else {
+			$has_custom_copyright = false;
+		}
+		$html_license = '';
+		//if there is not a supported license and
+		if ( ! $this->isSupportedType( $license ) && ( ! $has_custom_copyright && $all_rights_reserved)) {
 			return sprintf(
 				'<div class="license-attribution"><p>%s</p></div>',
 				sprintf(
@@ -440,7 +469,7 @@ class Licensing {
 					)
 				);
 			} elseif ( $license === 'all-rights-reserved' ) {
-				return sprintf(
+				$html_license = sprintf(
 					'<div class="license-attribution"><p>%s</p></div>',
 					sprintf(
 						__( '%1$s Copyright &copy;%2$s by %3$s. All Rights Reserved.', 'pressbooks' ),
@@ -450,7 +479,7 @@ class Licensing {
 					)
 				);
 			} elseif ( $license === 'public-domain' ) {
-				return sprintf(
+				$html_license = sprintf(
 					'<div class="license-attribution"><p>%1$s</p><p>%2$s</p></div>',
 					sprintf( '<img src="%1$s" alt="%2$s" role="presentation" />', get_template_directory_uri() . '/packages/buckram/assets/images/' . $license . '.svg', sprintf( __( 'Icon for the %s license', 'pressbooks' ), $name ) ),
 					sprintf(
@@ -460,7 +489,7 @@ class Licensing {
 					)
 				);
 			} elseif ( $license === 'cc-zero' ) {
-				return sprintf(
+				$html_license = sprintf(
 					'<div class="license-attribution"><p>%1$s</p><p>%2$s</p></div>',
 					sprintf( '<img src="%1$s" alt="%2$s" role="presentation" />', get_template_directory_uri() . '/packages/buckram/assets/images/' . $license . '.svg', sprintf( __( 'Icon for the %s license', 'pressbooks' ), $name ) ),
 					sprintf(
@@ -478,7 +507,7 @@ class Licensing {
 					)
 				);
 			} else {
-				return sprintf(
+				$html_license = sprintf(
 					__( '%1$s Copyright &copy;%2$s by %3$s is licensed under a %4$s, except where otherwise noted.', 'pressbooks' ),
 					sprintf( '<a href="%1$s" property="dc:title">%2$s</a>', $link, $title ),
 					( $copyright_year ) ? ' ' . $copyright_year : '',
@@ -487,6 +516,10 @@ class Licensing {
 				);
 			}
 		}
+		if ($has_custom_copyright) {
+			$html_license .= $metadata['pb_custom_copyright'];
+		}
+		return $html_license;
 	}
 
 	/**
